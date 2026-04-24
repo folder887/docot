@@ -3,7 +3,8 @@ import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { AppProvider, useApp } from './store'
 import { SplashScreen } from './screens/SplashScreen'
 import { WelcomeScreen } from './screens/WelcomeScreen'
-import { OnboardingScreen } from './screens/OnboardingScreen'
+import { SignupScreen } from './screens/SignupScreen'
+import { LoginScreen } from './screens/LoginScreen'
 import { ChatsScreen } from './screens/ChatsScreen'
 import { ChatDetailScreen } from './screens/ChatDetailScreen'
 import { CalendarScreen } from './screens/CalendarScreen'
@@ -41,7 +42,11 @@ function ThemeSync() {
 function Shell() {
   const { pathname, key } = useLocation()
   const isTopTab = TOP_TAB_ROUTES.includes(pathname)
-  const hideChrome = pathname === '/' || pathname === '/welcome' || pathname === '/onboarding'
+  const hideChrome =
+    pathname === '/' ||
+    pathname === '/welcome' ||
+    pathname === '/signup' ||
+    pathname === '/login'
 
   return (
     <div className="app-shell flex flex-col">
@@ -51,7 +56,8 @@ function Shell() {
           <Routes>
             <Route path="/" element={<SplashScreen />} />
             <Route path="/welcome" element={<WelcomeScreen />} />
-            <Route path="/onboarding" element={<OnboardingScreen />} />
+            <Route path="/signup" element={<SignupScreen />} />
+            <Route path="/login" element={<LoginScreen />} />
             <Route path="/menu" element={<MenuScreen />} />
             <Route path="/chats" element={<ChatsScreen />} />
             <Route path="/chats/:id" element={<ChatDetailScreen />} />
@@ -75,11 +81,16 @@ function Shell() {
 function Guarded() {
   const { state } = useApp()
   const { pathname } = useLocation()
-  const needsOnboarding = !state.onboarded
-  const publicRoutes = ['/', '/welcome', '/onboarding']
+  const publicRoutes = ['/', '/welcome', '/signup', '/login']
 
-  if (needsOnboarding && !publicRoutes.includes(pathname)) {
+  if (state.status === 'loading') {
+    return <Shell />
+  }
+  if (state.status !== 'authed' && !publicRoutes.includes(pathname)) {
     return <Navigate to="/welcome" replace />
+  }
+  if (state.status === 'authed' && publicRoutes.includes(pathname) && pathname !== '/') {
+    return <Navigate to="/chats" replace />
   }
   return <Shell />
 }

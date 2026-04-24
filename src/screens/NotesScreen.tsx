@@ -37,10 +37,10 @@ export function NotesScreen() {
           <button
             aria-label={t('notes.new', state.lang)}
             className="flex h-[44px] w-[44px] flex-shrink-0 items-center justify-center rounded-xl border-2 border-ink bg-ink text-paper transition-transform active:scale-95"
-            onClick={() => {
+            onClick={async () => {
               const title = window.prompt(t('notes.title', state.lang), 'New note')
               if (title) {
-                const id = addNote(title)
+                const id = await addNote(title)
                 navigate(`/notes/${id}`)
               }
             }}

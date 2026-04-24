@@ -53,7 +53,7 @@ function NoteEditor({ note }: { note: Note }) {
               className="rounded-full border-2 border-black px-3 py-1 text-xs font-bold"
               onClick={() => {
                 if (editing) {
-                  updateNote(note.id, { title: title.trim() || 'Untitled', body })
+                  void updateNote(note.id, { title: title.trim() || 'Untitled', body })
                 }
                 setEditing((e) => !e)
               }}
@@ -65,7 +65,7 @@ function NoteEditor({ note }: { note: Note }) {
               className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-black"
               onClick={() => {
                 if (window.confirm(`${t('notes.delete', state.lang)}?`)) {
-                  deleteNote(note.id)
+                  void deleteNote(note.id)
                   navigate('/notes', { replace: true })
                 }
               }}

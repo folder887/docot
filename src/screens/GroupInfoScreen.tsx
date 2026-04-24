@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { useApp } from '../store'
 import { t } from '../i18n'
@@ -8,9 +8,16 @@ import { IconBell, IconChevron, IconMoreH } from '../components/Icons'
 
 export function GroupInfoScreen() {
   const { id } = useParams<{ id: string }>()
-  const { state, userById, setPrefs } = useApp()
+  const { state, userById, setPrefs, loadUser } = useApp()
 
   const chat = useMemo(() => state.chats.find((c) => c.id === id) ?? null, [id, state.chats])
+
+  useEffect(() => {
+    if (!chat) return
+    for (const pid of chat.participants) {
+      if (!userById(pid)) void loadUser(pid)
+    }
+  }, [chat, userById, loadUser])
 
   if (!chat) {
     return (
@@ -75,7 +82,7 @@ export function GroupInfoScreen() {
               to={`/profile/${m.id}`}
               className="row-press flex items-center gap-3 rounded-2xl border border-line px-3 py-2"
             >
-              <Avatar name={m.name} size={40} filled={m.id !== 'me'} />
+              <Avatar name={m.name} size={40} filled={m.id !== state.me?.id} />
               <div className="min-w-0 flex-1">
                 <div className="truncate font-bold">{m.name}</div>
                 <div className="truncate text-xs text-muted">{m.handle || ''}</div>

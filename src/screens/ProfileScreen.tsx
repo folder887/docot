@@ -1,9 +1,11 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useApp } from '../store'
 import { relTime, t } from '../i18n'
 import { ScreenHeader } from '../components/ScreenHeader'
 import { Avatar } from '../components/Avatar'
+import { api } from '../api'
+import type { User } from '../types'
 import {
   IconBell,
   IconBlock,
@@ -17,11 +19,23 @@ import {
 
 export function ProfileScreen() {
   const { id } = useParams<{ id: string }>()
-  const { state, userById, updateContact, addChat, sendMessage, setPrefs } = useApp()
+  const { state, userById, loadUser, createChat, setPrefs } = useApp()
   const navigate = useNavigate()
 
-  const user = id ? userById(id) : null
-  const isMe = id === 'me'
+  const me = state.me
+  const isMe = id === 'me' || (me && id === me.id)
+  const [user, setUser] = useState<User | null>(() => (id ? userById(id) : null))
+  const [acting, setActing] = useState(false)
+
+  useEffect(() => {
+    if (!id) return
+    const cached = userById(id)
+    if (cached) {
+      const h = window.setTimeout(() => setUser(cached), 0)
+      return () => window.clearTimeout(h)
+    }
+    void loadUser(id).then(setUser)
+  }, [id, userById, loadUser])
 
   const sharedChats = useMemo(() => {
     if (!user || isMe) return []
@@ -37,32 +51,54 @@ export function ProfileScreen() {
     return (
       <div className="flex h-full flex-col bg-paper">
         <ScreenHeader title="Profile" />
-        <div className="p-6 text-muted">Not found.</div>
+        <div className="p-6 text-muted">{t('common.loading', state.lang)}</div>
       </div>
     )
   }
 
   const kind = user.kind ?? 'user'
-  const subtitle =
-    isMe
-      ? t('settings.myAccount', state.lang)
-      : kind === 'bot'
-        ? t('profile.bot', state.lang)
-        : kind === 'channel'
-          ? t('profile.channel', state.lang)
-          : kind === 'group'
-            ? t('profile.group', state.lang)
-            : user.lastSeen
-              ? `${t('profile.lastSeen', state.lang)} ${relTime(user.lastSeen, state.lang)}`
-              : t('profile.online', state.lang)
+  const subtitle = isMe
+    ? t('settings.myAccount', state.lang)
+    : kind === 'bot'
+      ? t('profile.bot', state.lang)
+      : kind === 'channel'
+        ? t('profile.channel', state.lang)
+        : kind === 'group'
+          ? t('profile.group', state.lang)
+          : user.lastSeen
+            ? `${t('profile.lastSeen', state.lang)} ${relTime(user.lastSeen, state.lang)}`
+            : t('profile.online', state.lang)
 
-  const openDm = () => {
+  const openDm = async () => {
     if (dm) {
       navigate(`/chats/${dm.id}`)
-    } else {
-      const newId = addChat(user.name, 'dm')
-      sendMessage(newId, `Hi, ${user.name}!`)
-      navigate(`/chats/${newId}`)
+      return
+    }
+    const newId = await createChat([user.id], 'dm')
+    navigate(`/chats/${newId}`)
+  }
+
+  const toggleContact = async () => {
+    if (acting) return
+    setActing(true)
+    try {
+      const next = user.isContact
+        ? await api.removeContact(user.id)
+        : await api.addContact(user.id)
+      setUser({ ...user, isContact: next.isContact, blocked: next.blocked })
+    } finally {
+      setActing(false)
+    }
+  }
+
+  const toggleBlock = async () => {
+    if (acting) return
+    setActing(true)
+    try {
+      const next = user.blocked ? await api.unblock(user.id) : await api.block(user.id)
+      setUser({ ...user, isContact: next.isContact, blocked: next.blocked })
+    } finally {
+      setActing(false)
     }
   }
 
@@ -119,13 +155,13 @@ export function ProfileScreen() {
         {user.bio && <InfoRow label={t('profile.bio', state.lang)} value={user.bio} multiline />}
       </div>
 
-      {!isMe && !user.isContact && kind === 'user' && (
+      {!isMe && kind === 'user' && (
         <button
           className="mx-4 mt-4 flex items-center gap-3 rounded-2xl border-2 border-ink px-4 py-3 text-left font-bold"
-          onClick={() => updateContact(user.id, { isContact: true })}
+          onClick={toggleContact}
         >
           <IconUserPlus size={20} />
-          {t('profile.addContact', state.lang)}
+          {user.isContact ? t('profile.removeContact', state.lang) : t('profile.addContact', state.lang)}
         </button>
       )}
 
@@ -156,7 +192,7 @@ export function ProfileScreen() {
       {!isMe && (
         <div className="mx-4 mt-6">
           <button
-            onClick={() => updateContact(user.id, { blocked: !user.blocked })}
+            onClick={toggleBlock}
             className="flex w-full items-center gap-3 rounded-2xl border-2 border-ink bg-paper px-4 py-3 font-bold text-ink"
           >
             <IconBlock size={20} />

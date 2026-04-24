@@ -6,24 +6,23 @@ import { Avatar } from '../components/Avatar'
 import { IconHeart, IconRepeat, IconReply } from '../components/Icons'
 
 export function NewsScreen() {
-  const { state, addPost, toggleLike, repost } = useApp()
+  const { state, addPost, toggleLike, repost, userById } = useApp()
   const [text, setText] = useState('')
-
-  const authorOf = (id: string) =>
-    id === 'me' ? state.me : state.contacts.find((c) => c.id === id) ?? state.me
+  const me = state.me
 
   return (
-    <div className="flex flex-col bg-white">
+    <div className="flex flex-col bg-paper text-ink">
       <form
-        className="border-b-2 border-black p-4"
+        className="border-b-2 border-ink p-4"
         onSubmit={(e) => {
           e.preventDefault()
-          addPost(text)
+          const t0 = text
           setText('')
+          void addPost(t0)
         }}
       >
         <div className="flex gap-3">
-          <Avatar name={state.me.name} size={40} filled />
+          <Avatar name={me?.name ?? '?'} size={40} filled />
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
@@ -43,33 +42,41 @@ export function NewsScreen() {
         </div>
       </form>
 
+      {state.news.length === 0 && (
+        <p className="p-6 text-center text-sm text-muted">{t('empty.news', state.lang)}</p>
+      )}
+
       <ul>
         {state.news.map((p) => {
-          const a = authorOf(p.authorId)
+          const a = userById(p.authorId)
+          const displayName = a?.name ?? p.authorId
+          const displayHandle = a?.handle ?? ''
           return (
             <li key={p.id} className="border-b border-line p-4 fade-in">
               <div className="flex gap-3">
                 <Link to={`/profile/${p.authorId}`} className="shrink-0">
-                  <Avatar name={a.name} size={40} filled={p.authorId !== 'me'} />
+                  <Avatar name={displayName} size={40} filled={p.authorId !== me?.id} />
                 </Link>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline gap-2 text-sm">
                     <Link to={`/profile/${p.authorId}`} className="font-black hover:underline">
-                      {a.name}
+                      {displayName}
                     </Link>
-                    <Link to={`/profile/${p.authorId}`} className="opacity-70 hover:underline">
-                      {a.handle}
-                    </Link>
+                    {displayHandle && (
+                      <Link to={`/profile/${p.authorId}`} className="opacity-70 hover:underline">
+                        {displayHandle}
+                      </Link>
+                    )}
                     <span className="opacity-50">· {relTime(p.at, state.lang)}</span>
                   </div>
                   <p className="mt-1 whitespace-pre-wrap break-words text-[15px] leading-relaxed">{p.text}</p>
-                  <div className="mt-3 flex items-center justify-between pr-4 text-black/70">
+                  <div className="mt-3 flex items-center justify-between pr-4 text-muted">
                     <ActionBtn icon={<IconReply size={18} />} count={p.replies} onClick={() => {}} />
-                    <ActionBtn icon={<IconRepeat size={18} />} count={p.reposts} onClick={() => repost(p.id)} />
+                    <ActionBtn icon={<IconRepeat size={18} />} count={p.reposts} onClick={() => void repost(p.id)} />
                     <ActionBtn
                       icon={<IconHeart size={18} filled={p.liked} />}
                       count={p.likes}
-                      onClick={() => toggleLike(p.id)}
+                      onClick={() => void toggleLike(p.id)}
                       active={p.liked}
                     />
                   </div>
