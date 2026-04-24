@@ -1,10 +1,31 @@
 export type Lang = 'en' | 'ru'
+export type Theme = 'light' | 'dark' | 'paper' | 'inverse'
+export type Wallpaper = 'none' | 'dots' | 'grid' | 'noise' | 'ink' | 'lines' | 'waves'
+
+export type Prefs = {
+  theme: Theme
+  wallpaper: Wallpaper
+  animations: boolean
+  reduceMotion: boolean
+  sounds: boolean
+  muteAll: boolean
+  readReceipts: boolean
+  lastSeen: boolean
+  twoStep: boolean
+  passcode: boolean
+  compactMode: boolean
+}
 
 export type User = {
   id: string
   name: string
   handle: string
   bio: string
+  kind?: 'user' | 'bot' | 'channel' | 'group'
+  lastSeen?: number
+  blocked?: boolean
+  isContact?: boolean
+  phone?: string
 }
 
 export type Message = {
@@ -55,6 +76,7 @@ export type NewsPost = {
 
 export type AppState = {
   lang: Lang
+  prefs: Prefs
   me: User
   contacts: User[]
   chats: Chat[]

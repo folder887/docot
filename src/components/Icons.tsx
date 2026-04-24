@@ -153,3 +153,139 @@ export function IconCheck({ size = 16, className }: IconProps) {
     </svg>
   )
 }
+
+export function IconBell({ size = 20, className, stroke = 2, muted }: IconProps & { muted?: boolean }) {
+  return (
+    <svg {...base(size)} className={className} stroke="currentColor" strokeWidth={stroke} fill="none" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9z" />
+      <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+      {muted && <line x1="3" y1="3" x2="21" y2="21" strokeWidth={stroke + 0.5} />}
+    </svg>
+  )
+}
+
+export function IconPhone({ size = 20, className, stroke = 2 }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} stroke="currentColor" strokeWidth={stroke} fill="none" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.86 19.86 0 0 1-8.63-3.07 19.54 19.54 0 0 1-6-6 19.86 19.86 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.13.95.36 1.9.68 2.8a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.9.32 1.85.55 2.81.68A2 2 0 0 1 22 16.92z" />
+    </svg>
+  )
+}
+
+export function IconMoreH({ size = 20, className }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} fill="currentColor">
+      <circle cx="5" cy="12" r="1.8" />
+      <circle cx="12" cy="12" r="1.8" />
+      <circle cx="19" cy="12" r="1.8" />
+    </svg>
+  )
+}
+
+export function IconUserPlus({ size = 20, className, stroke = 2 }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} stroke="currentColor" strokeWidth={stroke} fill="none" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <line x1="19" y1="8" x2="19" y2="14" />
+      <line x1="16" y1="11" x2="22" y2="11" />
+    </svg>
+  )
+}
+
+export function IconBlock({ size = 20, className, stroke = 2 }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} stroke="currentColor" strokeWidth={stroke} fill="none" strokeLinecap="round">
+      <circle cx="12" cy="12" r="9" />
+      <line x1="5.6" y1="5.6" x2="18.4" y2="18.4" />
+    </svg>
+  )
+}
+
+export function IconUser({ size = 20, className, stroke = 2 }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} stroke="currentColor" strokeWidth={stroke} fill="none" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+      <circle cx="12" cy="7" r="4" />
+    </svg>
+  )
+}
+
+export function IconLock({ size = 20, className, stroke = 2 }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} stroke="currentColor" strokeWidth={stroke} fill="none" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="11" width="18" height="11" rx="2" />
+      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+    </svg>
+  )
+}
+
+export function IconPalette({ size = 20, className, stroke = 2 }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} stroke="currentColor" strokeWidth={stroke} fill="none" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 22a10 10 0 1 1 0-20c5.5 0 10 4 10 8.5 0 3-2.5 4-4 4h-2a2 2 0 0 0-1 3.5c.5 1.5 0 4-3 4z" />
+      <circle cx="7" cy="12" r="1" fill="currentColor" />
+      <circle cx="10" cy="7" r="1" fill="currentColor" />
+      <circle cx="16" cy="7" r="1" fill="currentColor" />
+      <circle cx="18" cy="12" r="1" fill="currentColor" />
+    </svg>
+  )
+}
+
+export function IconFolder({ size = 20, className, stroke = 2 }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} stroke="currentColor" strokeWidth={stroke} fill="none" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+    </svg>
+  )
+}
+
+export function IconSliders({ size = 20, className, stroke = 2 }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} stroke="currentColor" strokeWidth={stroke} fill="none" strokeLinecap="round">
+      <line x1="4" y1="8" x2="20" y2="8" />
+      <line x1="4" y1="16" x2="20" y2="16" />
+      <circle cx="9" cy="8" r="2" fill="var(--paper)" />
+      <circle cx="15" cy="16" r="2" fill="var(--paper)" />
+    </svg>
+  )
+}
+
+export function IconSpeaker({ size = 20, className, stroke = 2 }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} stroke="currentColor" strokeWidth={stroke} fill="none" strokeLinecap="round" strokeLinejoin="round">
+      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19" />
+      <path d="M19 5a10 10 0 0 1 0 14" />
+      <path d="M16 9a5 5 0 0 1 0 6" />
+    </svg>
+  )
+}
+
+export function IconBattery({ size = 20, className, stroke = 2 }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} stroke="currentColor" strokeWidth={stroke} fill="none" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="7" width="17" height="10" rx="2" />
+      <line x1="22" y1="11" x2="22" y2="13" />
+      <rect x="4" y="9" width="10" height="6" fill="currentColor" />
+    </svg>
+  )
+}
+
+export function IconChevron({ size = 18, className, stroke = 2.5 }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} stroke="currentColor" strokeWidth={stroke} fill="none" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="9 6 15 12 9 18" />
+    </svg>
+  )
+}
+
+export function IconQR({ size = 18, className, stroke = 2 }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} stroke="currentColor" strokeWidth={stroke} fill="none" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="7" height="7" />
+      <rect x="14" y="3" width="7" height="7" />
+      <rect x="3" y="14" width="7" height="7" />
+      <path d="M14 14h3v3h-3zM20 14v3M14 20h3M20 20v1" />
+    </svg>
+  )
+}

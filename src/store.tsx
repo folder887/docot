@@ -1,16 +1,20 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import type { AppState, CalendarEvent, Chat, Lang, Message, Note, NewsPost } from './types'
+import type { AppState, CalendarEvent, Chat, Lang, Message, Note, NewsPost, Prefs, User } from './types'
 import { defaultState } from './data/mockData'
 
-const STORAGE_KEY = 'docot:v1'
+const STORAGE_KEY = 'docot:v2'
 
 function loadState(): AppState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw) return defaultState
     const parsed = JSON.parse(raw) as Partial<AppState>
-    return { ...defaultState, ...parsed }
+    return {
+      ...defaultState,
+      ...parsed,
+      prefs: { ...defaultState.prefs, ...(parsed.prefs ?? {}) },
+    }
   } catch {
     return defaultState
   }
@@ -27,10 +31,12 @@ function saveState(state: AppState) {
 type Ctx = {
   state: AppState
   setLang: (l: Lang) => void
+  setPrefs: (patch: Partial<Prefs>) => void
   completeOnboarding: (name: string, handle: string) => void
   logout: () => void
   sendMessage: (chatId: string, text: string) => void
   addChat: (title: string, kind?: Chat['kind']) => string
+  pinChat: (chatId: string, pinned: boolean) => void
   addEvent: (ev: Omit<CalendarEvent, 'id'>) => void
   updateEvent: (id: string, patch: Partial<CalendarEvent>) => void
   deleteEvent: (id: string) => void
@@ -41,7 +47,10 @@ type Ctx = {
   toggleLike: (id: string) => void
   repost: (id: string) => void
   updateMe: (patch: Partial<AppState['me']>) => void
+  updateContact: (id: string, patch: Partial<User>) => void
   resetAll: () => void
+  peerOf: (chat: Chat) => User | null
+  userById: (id: string) => User | null
 }
 
 const AppCtx = createContext<Ctx | null>(null)
@@ -59,6 +68,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const setLang = useCallback((lang: Lang) => {
     setState((s) => ({ ...s, lang }))
+  }, [])
+
+  const setPrefs = useCallback((patch: Partial<Prefs>) => {
+    setState((s) => ({ ...s, prefs: { ...s.prefs, ...patch } }))
+  }, [])
+
+  const pinChat = useCallback((chatId: string, pinned: boolean) => {
+    setState((s) => ({
+      ...s,
+      chats: s.chats.map((c) => (c.id === chatId ? { ...c, pinned } : c)),
+    }))
+  }, [])
+
+  const updateContact = useCallback((id: string, patch: Partial<User>) => {
+    setState((s) => ({
+      ...s,
+      contacts: s.contacts.map((c) => (c.id === id ? { ...c, ...patch } : c)),
+    }))
   }, [])
 
   const completeOnboarding = useCallback((name: string, handle: string) => {
@@ -192,14 +219,34 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setState(defaultState)
   }, [])
 
+  const userById = useCallback(
+    (id: string): User | null => {
+      if (id === 'me') return state.me
+      return state.contacts.find((c) => c.id === id) ?? null
+    },
+    [state.me, state.contacts],
+  )
+
+  const peerOf = useCallback(
+    (chat: Chat): User | null => {
+      if (chat.kind !== 'dm') return null
+      const otherId = chat.participants.find((p) => p !== 'me')
+      if (!otherId) return null
+      return userById(otherId)
+    },
+    [userById],
+  )
+
   const value = useMemo<Ctx>(
     () => ({
       state,
       setLang,
+      setPrefs,
       completeOnboarding,
       logout,
       sendMessage,
       addChat,
+      pinChat,
       addEvent,
       updateEvent,
       deleteEvent,
@@ -210,15 +257,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
       toggleLike,
       repost,
       updateMe,
+      updateContact,
       resetAll,
+      peerOf,
+      userById,
     }),
     [
       state,
       setLang,
+      setPrefs,
       completeOnboarding,
       logout,
       sendMessage,
       addChat,
+      pinChat,
       addEvent,
       updateEvent,
       deleteEvent,
@@ -229,7 +281,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       toggleLike,
       repost,
       updateMe,
+      updateContact,
       resetAll,
+      peerOf,
+      userById,
     ],
   )
 

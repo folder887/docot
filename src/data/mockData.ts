@@ -16,19 +16,35 @@ const yesterday = new Date(today.getTime() - 86400000)
 export const defaultState: AppState = {
   lang: 'en',
   onboarded: false,
+  prefs: {
+    theme: 'light',
+    wallpaper: 'dots',
+    animations: true,
+    reduceMotion: false,
+    sounds: true,
+    muteAll: false,
+    readReceipts: true,
+    lastSeen: true,
+    twoStep: false,
+    passcode: false,
+    compactMode: false,
+  },
   me: {
     id: 'me',
     name: 'You',
     handle: '@you',
     bio: 'Just exploring docot.',
+    kind: 'user',
+    phone: '+7 ••• ••• ••••',
   },
   contacts: [
-    { id: 'u1', name: 'Emma Torreaux', handle: '@emma', bio: 'Designer. Coffee ≥ sleep.' },
-    { id: 'u2', name: 'Roberto', handle: '@rob', bio: 'Say hello to Emma.' },
-    { id: 'u3', name: '8Bit Times', handle: '@8bit', bio: 'Retro news channel.' },
-    { id: 'u4', name: 'Digital Nomads', handle: '@nomads', bio: 'Traveling the world.' },
-    { id: 'u5', name: 'Jennie', handle: '@jen', bio: 'We just reached 2,500 members!' },
-    { id: 'u6', name: 'Penelope', handle: '@pen', bio: 'Reading more books this year.' },
+    { id: 'u1', name: 'Emma Torreaux', handle: '@emma', bio: 'Designer. Coffee ≥ sleep.', kind: 'user', lastSeen: hours(1), isContact: true, phone: '+1 555 01-34' },
+    { id: 'u2', name: 'Roberto', handle: '@rob', bio: 'Say hello to Emma.', kind: 'user', lastSeen: hours(6), isContact: true },
+    { id: 'u3', name: '8Bit Times', handle: '@8bit', bio: 'Retro news channel. Live stream every Friday.', kind: 'channel' },
+    { id: 'u4', name: 'Digital Nomads', handle: '@nomads', bio: 'Traveling the world. 2,500+ members.', kind: 'group' },
+    { id: 'u5', name: 'Jennie', handle: '@jen', bio: 'We just reached 2,500 members!', kind: 'user', lastSeen: mins(45), isContact: true },
+    { id: 'u6', name: 'Penelope', handle: '@pen', bio: 'Reading more books this year.', kind: 'user', lastSeen: mins(15), isContact: true },
+    { id: 'u7', name: 'Translator Bot', handle: '@translate_bot', bio: 'Instant translation in 140+ languages.', kind: 'bot' },
   ],
   chats: [
     {
@@ -88,6 +104,15 @@ export const defaultState: AppState = {
       participants: ['me', 'u6'],
       messages: [
         { id: 'm1', authorId: 'u6', text: 'Reading list for Q2?', at: mins(15) },
+      ],
+    },
+    {
+      id: 'c7',
+      title: 'Translator Bot',
+      kind: 'dm',
+      participants: ['me', 'u7'],
+      messages: [
+        { id: 'm1', authorId: 'u7', text: 'Send me any text and I will translate it. /start', at: hours(8) },
       ],
     },
   ],

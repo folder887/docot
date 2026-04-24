@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useApp } from '../store'
 import { relTime, t } from '../i18n'
 import { Avatar } from '../components/Avatar'
@@ -46,13 +47,19 @@ export function NewsScreen() {
         {state.news.map((p) => {
           const a = authorOf(p.authorId)
           return (
-            <li key={p.id} className="border-b border-black/15 p-4">
+            <li key={p.id} className="border-b border-line p-4 fade-in">
               <div className="flex gap-3">
-                <Avatar name={a.name} size={40} filled={p.authorId !== 'me'} />
+                <Link to={`/profile/${p.authorId}`} className="shrink-0">
+                  <Avatar name={a.name} size={40} filled={p.authorId !== 'me'} />
+                </Link>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline gap-2 text-sm">
-                    <span className="font-black">{a.name}</span>
-                    <span className="opacity-70">{a.handle}</span>
+                    <Link to={`/profile/${p.authorId}`} className="font-black hover:underline">
+                      {a.name}
+                    </Link>
+                    <Link to={`/profile/${p.authorId}`} className="opacity-70 hover:underline">
+                      {a.handle}
+                    </Link>
                     <span className="opacity-50">· {relTime(p.at, state.lang)}</span>
                   </div>
                   <p className="mt-1 whitespace-pre-wrap break-words text-[15px] leading-relaxed">{p.text}</p>
@@ -87,9 +94,19 @@ function ActionBtn({
   onClick: () => void
   active?: boolean
 }) {
+  const [popping, setPopping] = useState(false)
   return (
-    <button onClick={onClick} className={`flex items-center gap-1 text-xs font-bold ${active ? 'text-black' : ''}`}>
-      <span className={`flex h-7 w-7 items-center justify-center rounded-full ${active ? 'bg-black text-white' : ''}`}>
+    <button
+      onClick={() => {
+        setPopping(true)
+        window.setTimeout(() => setPopping(false), 320)
+        onClick()
+      }}
+      className={`flex items-center gap-1 text-xs font-bold transition-colors ${active ? 'text-ink' : 'text-muted'}`}
+    >
+      <span
+        className={`${popping ? 'pop' : ''} flex h-7 w-7 items-center justify-center rounded-full transition-colors ${active ? 'bg-ink text-paper' : ''}`}
+      >
         {icon}
       </span>
       {count}

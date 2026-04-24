@@ -21,7 +21,7 @@ const TABS: Tab[] = [
 export function TabBar() {
   const { state } = useApp()
   return (
-    <nav className="sticky bottom-0 z-10 border-t-2 border-black bg-white">
+    <nav className="sticky bottom-0 z-10 border-t-2 border-ink bg-paper">
       <ul className="grid grid-cols-5">
         {TABS.map((tab) => {
           const Icon = tab.icon
@@ -30,14 +30,20 @@ export function TabBar() {
               <NavLink
                 to={tab.to}
                 className={({ isActive }) =>
-                  `flex flex-1 flex-col items-center justify-center gap-0.5 py-2.5 text-[10px] font-bold uppercase tracking-wide ${
-                    isActive ? 'bg-black text-white' : 'text-black'
+                  `ripple relative flex flex-1 flex-col items-center justify-center gap-0.5 py-2.5 text-[10px] font-bold uppercase tracking-wide transition-colors duration-200 ${
+                    isActive ? 'bg-ink text-paper' : 'text-ink'
                   }`
                 }
                 aria-label={t(tab.labelKey, state.lang)}
               >
-                <Icon size={22} />
-                <span>{t(tab.labelKey, state.lang)}</span>
+                {({ isActive }) => (
+                  <>
+                    <span className={isActive ? 'tab-active' : ''} style={{ transition: 'transform 200ms var(--ease)' }}>
+                      <Icon size={22} />
+                    </span>
+                    <span>{t(tab.labelKey, state.lang)}</span>
+                  </>
+                )}
               </NavLink>
             </li>
           )

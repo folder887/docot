@@ -9,8 +9,11 @@ export default {
         mono: ['"JetBrains Mono"', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
       },
       colors: {
-        ink: '#000000',
-        paper: '#ffffff',
+        black: 'var(--ink)',
+        white: 'var(--paper)',
+        ink: 'var(--ink)',
+        paper: 'var(--paper)',
+        muted: 'var(--muted)',
       },
       borderWidth: {
         '3': '3px',
