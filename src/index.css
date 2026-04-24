@@ -1,0 +1,101 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,500;0,700;0,900;1,700;1,900&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  min-height: 100svh;
+  background: #fff;
+  color: #000;
+  font-family: 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  overscroll-behavior-y: none;
+}
+
+body {
+  margin: 0;
+}
+
+button {
+  font-family: inherit;
+}
+
+/* Black-and-white scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #000 #fff;
+}
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #000;
+  border-radius: 3px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Remove default input styling */
+input,
+textarea,
+select {
+  font-family: inherit;
+  color: inherit;
+}
+
+@layer components {
+  .bw-btn {
+    @apply inline-flex items-center justify-center rounded-full border-2 border-black px-6 py-3 font-bold transition-transform active:scale-[0.98];
+  }
+  .bw-btn-primary {
+    @apply bw-btn bg-black text-white;
+  }
+  .bw-btn-ghost {
+    @apply bw-btn bg-white text-black;
+  }
+  .bw-card {
+    @apply rounded-2xl border-2 border-black bg-white;
+  }
+  .bw-input {
+    @apply w-full rounded-xl border-2 border-black bg-white px-4 py-3 text-black placeholder:text-black/40 focus:outline-none;
+  }
+  .bw-chip {
+    @apply inline-flex items-center gap-1 rounded-full border-2 border-black bg-white px-3 py-1 text-xs font-bold;
+  }
+}
+
+.italic-display {
+  font-style: italic;
+  font-weight: 900;
+  letter-spacing: -0.01em;
+}
+
+/* Shell used to make the web app feel mobile-first */
+.app-shell {
+  max-width: 440px;
+  margin: 0 auto;
+  min-height: 100svh;
+  background: #fff;
+  position: relative;
+  overflow: hidden;
+  border-left: 1px solid #eee;
+  border-right: 1px solid #eee;
+}
+
+@media (min-width: 441px) {
+  body {
+    background: #fafafa;
+  }
+}
