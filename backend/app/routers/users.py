@@ -1,0 +1,188 @@
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import or_
+from sqlalchemy.orm import Session
+
+from ..auth import current_user
+from ..db import get_db
+from ..models import Contact, User
+from ..schemas import UserOut, UserUpdateIn
+
+router = APIRouter(prefix="/users", tags=["users"])
+
+
+def _out(u: User, me_contacts: dict[str, Contact] | None = None) -> UserOut:
+    info = me_contacts.get(u.id) if me_contacts else None
+    return UserOut(
+        id=u.id,
+        handle=f"@{u.handle}",
+        name=u.name,
+        bio=u.bio,
+        kind=u.kind,
+        phone=u.phone,
+        lastSeen=u.last_seen_at,
+        isContact=bool(info),
+        blocked=bool(info and info.blocked),
+    )
+
+
+@router.get("/search", response_model=list[UserOut])
+def search(
+    q: str = "",
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> list[UserOut]:
+    qn = q.strip().lstrip("@").lower()
+    if len(qn) < 1:
+        return []
+    rows = (
+        db.query(User)
+        .filter(
+            User.id != me.id,
+            or_(User.handle.like(f"%{qn}%"), User.name.ilike(f"%{q.strip()}%")),
+        )
+        .order_by(User.handle)
+        .limit(20)
+        .all()
+    )
+    contacts = {
+        c.contact_id: c
+        for c in db.query(Contact).filter(Contact.owner_id == me.id).all()
+    }
+    return [_out(u, contacts) for u in rows]
+
+
+@router.get("/{user_id}", response_model=UserOut)
+def get_user(
+    user_id: str,
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> UserOut:
+    if user_id == "me":
+        user_id = me.id
+    u = db.get(User, user_id)
+    if not u:
+        raise HTTPException(status_code=404, detail="User not found")
+    c = (
+        db.query(Contact)
+        .filter(Contact.owner_id == me.id, Contact.contact_id == u.id)
+        .first()
+    )
+    return _out(u, {u.id: c} if c else None)
+
+
+@router.patch("/me", response_model=UserOut)
+def update_me(
+    body: UserUpdateIn,
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> UserOut:
+    if body.name is not None:
+        me.name = body.name.strip()
+    if body.bio is not None:
+        me.bio = body.bio
+    if body.phone is not None:
+        me.phone = body.phone
+    db.add(me)
+    db.commit()
+    db.refresh(me)
+    return _out(me)
+
+
+@router.post("/{user_id}/contact", response_model=UserOut)
+def add_contact(
+    user_id: str,
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> UserOut:
+    if user_id == me.id:
+        raise HTTPException(status_code=400, detail="Cannot add self")
+    target = db.get(User, user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    existing = (
+        db.query(Contact)
+        .filter(Contact.owner_id == me.id, Contact.contact_id == target.id)
+        .first()
+    )
+    if existing:
+        existing.blocked = False
+    else:
+        db.add(Contact(owner_id=me.id, contact_id=target.id))
+    db.commit()
+    return _out(target, {target.id: existing} if existing else None)
+
+
+@router.delete("/{user_id}/contact", response_model=UserOut)
+def remove_contact(
+    user_id: str,
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> UserOut:
+    target = db.get(User, user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    db.query(Contact).filter(
+        Contact.owner_id == me.id, Contact.contact_id == target.id
+    ).delete()
+    db.commit()
+    return _out(target)
+
+
+@router.post("/{user_id}/block", response_model=UserOut)
+def block(
+    user_id: str,
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> UserOut:
+    target = db.get(User, user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    c = (
+        db.query(Contact)
+        .filter(Contact.owner_id == me.id, Contact.contact_id == target.id)
+        .first()
+    )
+    if c is None:
+        c = Contact(owner_id=me.id, contact_id=target.id, blocked=True)
+        db.add(c)
+    else:
+        c.blocked = True
+    db.commit()
+    db.refresh(c)
+    return _out(target, {target.id: c})
+
+
+@router.post("/{user_id}/unblock", response_model=UserOut)
+def unblock(
+    user_id: str,
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> UserOut:
+    target = db.get(User, user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    c = (
+        db.query(Contact)
+        .filter(Contact.owner_id == me.id, Contact.contact_id == target.id)
+        .first()
+    )
+    if c:
+        c.blocked = False
+        db.commit()
+    return _out(target, {target.id: c} if c else None)
+
+
+@router.get("", response_model=list[UserOut])
+def list_contacts(
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> list[UserOut]:
+    rows = (
+        db.query(Contact, User)
+        .join(User, User.id == Contact.contact_id)
+        .filter(Contact.owner_id == me.id)
+        .all()
+    )
+    return [_out(u, {u.id: c}) for c, u in rows]

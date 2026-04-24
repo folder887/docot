@@ -28,10 +28,10 @@ export function WelcomeScreen() {
       </div>
 
       <div className="flex flex-col gap-3 px-6 pb-10">
-        <Link to="/onboarding" className="bw-btn-primary text-lg">
+        <Link to="/signup" className="bw-btn-primary text-lg">
           {t('welcome.createAcc', state.lang)}
         </Link>
-        <Link to="/onboarding" className="bw-btn-ghost text-lg">
+        <Link to="/login" className="bw-btn-ghost text-lg">
           {t('welcome.haveAcc', state.lang)}
         </Link>
       </div>

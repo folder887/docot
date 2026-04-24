@@ -38,10 +38,13 @@ export type Message = {
 export type Chat = {
   id: string
   title: string
-  kind: 'dm' | 'group' | 'channel'
+  kind: 'dm' | 'group' | 'channel' | 'saved'
   participants: string[]
   messages: Message[]
   pinned?: boolean
+  muted?: boolean
+  updatedAt?: number
+  lastMessage?: Message | null
 }
 
 export type CalendarEvent = {
@@ -51,7 +54,6 @@ export type CalendarEvent = {
   start?: string
   end?: string
   notes?: string
-  linkedNoteIds?: string[]
 }
 
 export type Note = {
@@ -74,14 +76,16 @@ export type NewsPost = {
   liked?: boolean
 }
 
-export type AppState = {
-  lang: Lang
-  prefs: Prefs
-  me: User
-  contacts: User[]
-  chats: Chat[]
-  events: CalendarEvent[]
-  notes: Note[]
-  news: NewsPost[]
-  onboarded: boolean
+export const defaultPrefs: Prefs = {
+  theme: 'light',
+  wallpaper: 'dots',
+  animations: true,
+  reduceMotion: false,
+  sounds: true,
+  muteAll: false,
+  readReceipts: true,
+  lastSeen: true,
+  twoStep: false,
+  passcode: false,
+  compactMode: false,
 }

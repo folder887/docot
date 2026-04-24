@@ -36,26 +36,27 @@ const SECTIONS: Row[] = [
 export function SettingsScreen() {
   const { state, logout } = useApp()
   const navigate = useNavigate()
+  const me = state.me
 
   return (
     <div className="flex min-h-0 flex-col bg-paper">
       <ScreenHeader title={t('settings.title', state.lang)} />
 
       <Link
-        to="/profile/me"
+        to={me ? `/profile/${me.id}` : '/settings'}
         className="row-press mx-4 mt-2 flex items-center gap-3 rounded-2xl border-2 border-ink bg-paper p-3"
       >
-        <Avatar name={state.me.name} size={56} filled />
+        <Avatar name={me?.name ?? '?'} size={56} filled />
         <div className="min-w-0 flex-1">
-          <div className="truncate text-lg font-black italic">{state.me.name}</div>
-          <div className="truncate text-sm text-muted">{state.me.handle}</div>
+          <div className="truncate text-lg font-black italic">{me?.name ?? '—'}</div>
+          <div className="truncate text-sm text-muted">{me?.handle ?? ''}</div>
         </div>
         <button
           aria-label="QR"
           className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-ink"
           onClick={(e) => {
             e.preventDefault()
-            window.alert(state.me.handle)
+            if (me) window.alert(me.handle)
           }}
         >
           <IconQR size={16} />

@@ -1,70 +1,259 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import type { AppState, CalendarEvent, Chat, Lang, Message, Note, NewsPost, Prefs, User } from './types'
-import { defaultState } from './data/mockData'
+import type {
+  ApiChat,
+  ApiEvent,
+  ApiMessage,
+  ApiNote,
+  ApiPost,
+  ApiUser,
+} from './api'
+import { api, getToken, setToken } from './api'
+import type { CalendarEvent, Chat, Lang, Message, NewsPost, Note, Prefs, User } from './types'
+import { defaultPrefs } from './types'
 
-const STORAGE_KEY = 'docot:v2'
+const PREFS_KEY = 'docot:prefs'
+const LANG_KEY = 'docot:lang'
 
-function loadState(): AppState {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return defaultState
-    const parsed = JSON.parse(raw) as Partial<AppState>
-    return {
-      ...defaultState,
-      ...parsed,
-      prefs: { ...defaultState.prefs, ...(parsed.prefs ?? {}) },
-    }
-  } catch {
-    return defaultState
-  }
-}
+type Status = 'loading' | 'anon' | 'authed'
 
-function saveState(state: AppState) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
-  } catch {
-    // ignore quota
-  }
+export type AppState = {
+  status: Status
+  lang: Lang
+  prefs: Prefs
+  me: User | null
+  users: Record<string, User>
+  chats: Chat[]
+  events: CalendarEvent[]
+  notes: Note[]
+  news: NewsPost[]
+  /** true once user completed signup/login */
+  onboarded: boolean
 }
 
 type Ctx = {
   state: AppState
   setLang: (l: Lang) => void
   setPrefs: (patch: Partial<Prefs>) => void
-  completeOnboarding: (name: string, handle: string) => void
+  signup: (handle: string, name: string, password: string) => Promise<void>
+  login: (handle: string, password: string) => Promise<void>
   logout: () => void
-  sendMessage: (chatId: string, text: string) => void
-  addChat: (title: string, kind?: Chat['kind']) => string
-  pinChat: (chatId: string, pinned: boolean) => void
-  addEvent: (ev: Omit<CalendarEvent, 'id'>) => void
-  updateEvent: (id: string, patch: Partial<CalendarEvent>) => void
-  deleteEvent: (id: string) => void
-  addNote: (title: string) => string
-  updateNote: (id: string, patch: Partial<Note>) => void
-  deleteNote: (id: string) => void
-  addPost: (text: string) => void
-  toggleLike: (id: string) => void
-  repost: (id: string) => void
-  updateMe: (patch: Partial<AppState['me']>) => void
-  updateContact: (id: string, patch: Partial<User>) => void
-  resetAll: () => void
-  peerOf: (chat: Chat) => User | null
+  sendMessage: (chatId: string, text: string) => Promise<void>
+  createChat: (participantIds: string[], kind?: Chat['kind'], title?: string) => Promise<string>
+  pinChat: (chatId: string, pinned: boolean) => Promise<void>
+  muteChat: (chatId: string, muted: boolean) => Promise<void>
+  deleteChat: (chatId: string) => Promise<void>
+  addEvent: (ev: Omit<CalendarEvent, 'id'>) => Promise<void>
+  updateEvent: (id: string, patch: Omit<CalendarEvent, 'id'>) => Promise<void>
+  deleteEvent: (id: string) => Promise<void>
+  addNote: (title: string) => Promise<string>
+  updateNote: (id: string, patch: Partial<Pick<Note, 'title' | 'body' | 'tags'>>) => Promise<void>
+  deleteNote: (id: string) => Promise<void>
+  addPost: (text: string) => Promise<void>
+  toggleLike: (id: string) => Promise<void>
+  repost: (id: string) => Promise<void>
+  updateMe: (patch: { name?: string; bio?: string; phone?: string }) => Promise<void>
+  loadUser: (id: string) => Promise<User | null>
   userById: (id: string) => User | null
+  peerOf: (chat: Chat) => User | null
+  searchUsers: (q: string) => Promise<User[]>
+  refresh: () => Promise<void>
+  addIncomingMessage: (chatId: string, msg: Message) => void
 }
 
 const AppCtx = createContext<Ctx | null>(null)
 
-function uid(prefix: string) {
-  return `${prefix}_${Math.random().toString(36).slice(2, 9)}`
+function loadPrefs(): Prefs {
+  try {
+    const raw = localStorage.getItem(PREFS_KEY)
+    if (!raw) return defaultPrefs
+    return { ...defaultPrefs, ...(JSON.parse(raw) as Partial<Prefs>) }
+  } catch {
+    return defaultPrefs
+  }
+}
+
+function loadLang(): Lang {
+  const v = localStorage.getItem(LANG_KEY)
+  return v === 'ru' ? 'ru' : 'en'
+}
+
+function userFromApi(u: ApiUser): User {
+  return {
+    id: u.id,
+    name: u.name,
+    handle: u.handle,
+    bio: u.bio,
+    kind: u.kind,
+    lastSeen: u.lastSeen ?? undefined,
+    blocked: u.blocked,
+    isContact: u.isContact,
+    phone: u.phone,
+  }
+}
+
+function msgFromApi(m: ApiMessage): Message {
+  return { id: m.id, authorId: m.authorId, text: m.text, at: m.at }
+}
+
+function chatFromApi(c: ApiChat): Chat {
+  return {
+    id: c.id,
+    kind: c.kind,
+    title: c.title,
+    participants: c.participants,
+    messages: c.messages.map(msgFromApi),
+    pinned: c.pinned,
+    muted: c.muted,
+    updatedAt: c.updatedAt,
+    lastMessage: c.lastMessage ? msgFromApi(c.lastMessage) : null,
+  }
+}
+
+function noteFromApi(n: ApiNote): Note {
+  return {
+    id: n.id,
+    title: n.title,
+    body: n.body,
+    tags: n.tags,
+    createdAt: n.createdAt,
+    updatedAt: n.updatedAt,
+  }
+}
+
+function eventFromApi(e: ApiEvent): CalendarEvent {
+  return {
+    id: e.id,
+    title: e.title,
+    date: e.date,
+    start: e.start,
+    end: e.end,
+    notes: e.note,
+  }
+}
+
+function postFromApi(p: ApiPost): NewsPost {
+  return {
+    id: p.id,
+    authorId: p.authorId,
+    text: p.text,
+    at: p.at,
+    likes: p.likes,
+    reposts: p.reposts,
+    replies: p.replies,
+    liked: p.liked,
+  }
+}
+
+function emptyState(lang: Lang, prefs: Prefs, status: Status): AppState {
+  return {
+    status,
+    lang,
+    prefs,
+    me: null,
+    users: {},
+    chats: [],
+    events: [],
+    notes: [],
+    news: [],
+    onboarded: false,
+  }
 }
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<AppState>(() => loadState())
+  const [state, setState] = useState<AppState>(() => emptyState(loadLang(), loadPrefs(), 'loading'))
 
+  // persist prefs + lang
   useEffect(() => {
-    saveState(state)
-  }, [state])
+    try {
+      localStorage.setItem(PREFS_KEY, JSON.stringify(state.prefs))
+    } catch {
+      /* ignore */
+    }
+  }, [state.prefs])
+  useEffect(() => {
+    try {
+      localStorage.setItem(LANG_KEY, state.lang)
+    } catch {
+      /* ignore */
+    }
+  }, [state.lang])
+
+  const mergeUsers = useCallback((list: User[]) => {
+    setState((s) => {
+      const users = { ...s.users }
+      for (const u of list) users[u.id] = u
+      return { ...s, users }
+    })
+  }, [])
+
+  const hydrate = useCallback(async (me: User) => {
+    const [chats, notes, events, posts, contacts] = await Promise.all([
+      api.listChats(),
+      api.listNotes(),
+      api.listEvents(),
+      api.listPosts(),
+      api.listContacts(),
+    ])
+    // collect unknown participant IDs to fetch their profiles
+    const knownIds = new Set<string>([me.id, ...contacts.map((c) => c.id)])
+    const allUsers: User[] = [me, ...contacts.map(userFromApi)]
+    const missing = new Set<string>()
+    for (const c of chats) {
+      for (const pid of c.participants) {
+        if (!knownIds.has(pid)) missing.add(pid)
+      }
+    }
+    for (const p of posts) {
+      if (!knownIds.has(p.authorId)) missing.add(p.authorId)
+    }
+    if (missing.size) {
+      const fetched = await Promise.all(
+        [...missing].map((id) => api.getUser(id).catch(() => null)),
+      )
+      for (const u of fetched) if (u) allUsers.push(userFromApi(u))
+    }
+
+    const usersIdx: Record<string, User> = {}
+    for (const u of allUsers) usersIdx[u.id] = u
+
+    setState((s) => ({
+      ...s,
+      status: 'authed',
+      onboarded: true,
+      me,
+      users: { ...s.users, ...usersIdx },
+      chats: chats.map(chatFromApi).sort(sortChats),
+      notes: notes.map(noteFromApi),
+      events: events.map(eventFromApi),
+      news: posts.map(postFromApi),
+    }))
+  }, [])
+
+  // boot: try to fetch me via stored token
+  useEffect(() => {
+    let cancelled = false
+    const run = async () => {
+      const tok = getToken()
+      if (!tok) {
+        setState((s) => ({ ...s, status: 'anon' }))
+        return
+      }
+      try {
+        const u = await api.me()
+        if (cancelled) return
+        await hydrate(userFromApi(u))
+      } catch {
+        setToken(null)
+        if (!cancelled) setState((s) => ({ ...s, status: 'anon' }))
+      }
+    }
+    void run()
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const setLang = useCallback((lang: Lang) => {
     setState((s) => ({ ...s, lang }))
@@ -74,179 +263,268 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setState((s) => ({ ...s, prefs: { ...s.prefs, ...patch } }))
   }, [])
 
-  const pinChat = useCallback((chatId: string, pinned: boolean) => {
-    setState((s) => ({
-      ...s,
-      chats: s.chats.map((c) => (c.id === chatId ? { ...c, pinned } : c)),
-    }))
-  }, [])
+  const signup = useCallback(
+    async (handle: string, name: string, password: string) => {
+      const { token, user } = await api.signup(handle, name, password)
+      setToken(token)
+      await hydrate(userFromApi(user))
+    },
+    [hydrate],
+  )
 
-  const updateContact = useCallback((id: string, patch: Partial<User>) => {
-    setState((s) => ({
-      ...s,
-      contacts: s.contacts.map((c) => (c.id === id ? { ...c, ...patch } : c)),
-    }))
-  }, [])
-
-  const completeOnboarding = useCallback((name: string, handle: string) => {
-    setState((s) => ({
-      ...s,
-      onboarded: true,
-      me: {
-        ...s.me,
-        name: name || s.me.name,
-        handle: handle.startsWith('@') ? handle : `@${handle || s.me.handle.replace('@', '')}`,
-      },
-    }))
-  }, [])
+  const login = useCallback(
+    async (handle: string, password: string) => {
+      const { token, user } = await api.login(handle, password)
+      setToken(token)
+      await hydrate(userFromApi(user))
+    },
+    [hydrate],
+  )
 
   const logout = useCallback(() => {
-    localStorage.removeItem(STORAGE_KEY)
-    setState(defaultState)
+    setToken(null)
+    setState((s) => emptyState(s.lang, s.prefs, 'anon'))
   }, [])
 
-  const sendMessage = useCallback((chatId: string, text: string) => {
-    const trimmed = text.trim()
-    if (!trimmed) return
+  const refresh = useCallback(async () => {
+    if (!state.me) return
+    await hydrate(state.me)
+  }, [hydrate, state.me])
+
+  const sendMessage = useCallback(
+    async (chatId: string, text: string) => {
+      const trimmed = text.trim()
+      if (!trimmed) return
+      const msg = msgFromApi(await api.sendMessage(chatId, trimmed))
+      setState((s) => ({
+        ...s,
+        chats: s.chats
+          .map((c) =>
+            c.id === chatId
+              ? {
+                  ...c,
+                  messages: [...c.messages, msg],
+                  lastMessage: msg,
+                  updatedAt: msg.at,
+                }
+              : c,
+          )
+          .sort(sortChats),
+      }))
+    },
+    [],
+  )
+
+  const addIncomingMessage = useCallback((chatId: string, msg: Message) => {
     setState((s) => ({
       ...s,
-      chats: s.chats.map((c) =>
-        c.id === chatId
-          ? {
-              ...c,
-              messages: [
-                ...c.messages,
-                { id: uid('m'), authorId: 'me', text: trimmed, at: Date.now() } satisfies Message,
-              ],
-            }
-          : c,
-      ),
+      chats: s.chats
+        .map((c) =>
+          c.id === chatId
+            ? c.messages.some((m) => m.id === msg.id)
+              ? c
+              : {
+                  ...c,
+                  messages: [...c.messages, msg],
+                  lastMessage: msg,
+                  updatedAt: msg.at,
+                }
+            : c,
+        )
+        .sort(sortChats),
     }))
   }, [])
 
-  const addChat = useCallback((title: string, kind: Chat['kind'] = 'dm') => {
-    const id = uid('c')
+  const createChat = useCallback(
+    async (participantIds: string[], kind: Chat['kind'] = 'dm', title?: string) => {
+      const real = kind === 'saved' ? 'dm' : kind
+      const body = {
+        kind: real as 'dm' | 'group' | 'channel',
+        title,
+        participantIds,
+      }
+      const chat = chatFromApi(await api.createChat(body))
+      setState((s) => {
+        const existing = s.chats.find((c) => c.id === chat.id)
+        const chats = existing
+          ? s.chats.map((c) => (c.id === chat.id ? chat : c))
+          : [chat, ...s.chats]
+        return { ...s, chats: chats.sort(sortChats) }
+      })
+      return chat.id
+    },
+    [],
+  )
+
+  const pinChat = useCallback(async (chatId: string, pinned: boolean) => {
+    await api.pinChat(chatId, pinned)
     setState((s) => ({
       ...s,
-      chats: [
-        { id, title, kind, participants: ['me'], messages: [] },
-        ...s.chats,
-      ],
+      chats: s.chats.map((c) => (c.id === chatId ? { ...c, pinned } : c)).sort(sortChats),
     }))
-    return id
   }, [])
 
-  const addEvent = useCallback((ev: Omit<CalendarEvent, 'id'>) => {
+  const muteChat = useCallback(async (chatId: string, muted: boolean) => {
+    await api.muteChat(chatId, muted)
     setState((s) => ({
       ...s,
-      events: [...s.events, { ...ev, id: uid('e') }],
+      chats: s.chats.map((c) => (c.id === chatId ? { ...c, muted } : c)),
     }))
   }, [])
 
-  const updateEvent = useCallback((id: string, patch: Partial<CalendarEvent>) => {
+  const deleteChat = useCallback(async (chatId: string) => {
+    await api.deleteChat(chatId)
+    setState((s) => ({ ...s, chats: s.chats.filter((c) => c.id !== chatId) }))
+  }, [])
+
+  const addEvent = useCallback(async (ev: Omit<CalendarEvent, 'id'>) => {
+    const created = eventFromApi(
+      await api.createEvent({
+        title: ev.title,
+        date: ev.date,
+        start: ev.start ?? '',
+        end: ev.end ?? '',
+        note: ev.notes ?? '',
+      }),
+    )
+    setState((s) => ({ ...s, events: [...s.events, created] }))
+  }, [])
+
+  const updateEvent = useCallback(async (id: string, patch: Omit<CalendarEvent, 'id'>) => {
+    const updated = eventFromApi(
+      await api.updateEvent(id, {
+        title: patch.title,
+        date: patch.date,
+        start: patch.start ?? '',
+        end: patch.end ?? '',
+        note: patch.notes ?? '',
+      }),
+    )
     setState((s) => ({
       ...s,
-      events: s.events.map((e) => (e.id === id ? { ...e, ...patch } : e)),
+      events: s.events.map((e) => (e.id === id ? updated : e)),
     }))
   }, [])
 
-  const deleteEvent = useCallback((id: string) => {
+  const deleteEvent = useCallback(async (id: string) => {
+    await api.deleteEvent(id)
     setState((s) => ({ ...s, events: s.events.filter((e) => e.id !== id) }))
   }, [])
 
-  const addNote = useCallback((title: string) => {
-    const id = uid('n')
-    const now = Date.now()
-    setState((s) => ({
-      ...s,
-      notes: [
-        { id, title: title || 'Untitled', body: `# ${title || 'Untitled'}\n\n`, tags: [], createdAt: now, updatedAt: now },
-        ...s.notes,
-      ],
-    }))
-    return id
+  const addNote = useCallback(async (title: string) => {
+    const t = title.trim() || 'Untitled'
+    const created = noteFromApi(
+      await api.createNote({ title: t, body: `# ${t}\n\n`, tags: [] }),
+    )
+    setState((s) => ({ ...s, notes: [created, ...s.notes] }))
+    return created.id
   }, [])
 
-  const updateNote = useCallback((id: string, patch: Partial<Note>) => {
-    setState((s) => ({
-      ...s,
-      notes: s.notes.map((n) => (n.id === id ? { ...n, ...patch, updatedAt: Date.now() } : n)),
-    }))
-  }, [])
+  const updateNote = useCallback(
+    async (id: string, patch: Partial<Pick<Note, 'title' | 'body' | 'tags'>>) => {
+      const updated = noteFromApi(await api.updateNote(id, patch))
+      setState((s) => ({
+        ...s,
+        notes: s.notes.map((n) => (n.id === id ? updated : n)),
+      }))
+    },
+    [],
+  )
 
-  const deleteNote = useCallback((id: string) => {
+  const deleteNote = useCallback(async (id: string) => {
+    await api.deleteNote(id)
     setState((s) => ({ ...s, notes: s.notes.filter((n) => n.id !== id) }))
   }, [])
 
-  const addPost = useCallback((text: string) => {
+  const addPost = useCallback(async (text: string) => {
     const trimmed = text.trim()
     if (!trimmed) return
-    const post: NewsPost = {
-      id: uid('p'),
-      authorId: 'me',
-      text: trimmed,
-      at: Date.now(),
-      likes: 0,
-      reposts: 0,
-      replies: 0,
-    }
-    setState((s) => ({ ...s, news: [post, ...s.news] }))
+    const p = postFromApi(await api.createPost(trimmed))
+    setState((s) => ({ ...s, news: [p, ...s.news] }))
   }, [])
 
-  const toggleLike = useCallback((id: string) => {
+  const toggleLike = useCallback(async (id: string) => {
+    const p = postFromApi(await api.likePost(id))
     setState((s) => ({
       ...s,
-      news: s.news.map((p) =>
-        p.id === id
-          ? { ...p, liked: !p.liked, likes: p.liked ? p.likes - 1 : p.likes + 1 }
-          : p,
-      ),
+      news: s.news.map((n) => (n.id === id ? p : n)),
     }))
   }, [])
 
-  const repost = useCallback((id: string) => {
+  const repost = useCallback(async (id: string) => {
+    const p = postFromApi(await api.repostPost(id))
     setState((s) => ({
       ...s,
-      news: s.news.map((p) => (p.id === id ? { ...p, reposts: p.reposts + 1 } : p)),
+      news: s.news.map((n) => (n.id === id ? p : n)),
     }))
   }, [])
 
-  const updateMe = useCallback((patch: Partial<AppState['me']>) => {
-    setState((s) => ({ ...s, me: { ...s.me, ...patch } }))
-  }, [])
+  const updateMe = useCallback(
+    async (patch: { name?: string; bio?: string; phone?: string }) => {
+      const u = userFromApi(await api.updateMe(patch))
+      setState((s) => ({
+        ...s,
+        me: u,
+        users: { ...s.users, [u.id]: u },
+      }))
+    },
+    [],
+  )
 
-  const resetAll = useCallback(() => {
-    setState(defaultState)
-  }, [])
+  const loadUser = useCallback(
+    async (id: string) => {
+      const cached = state.users[id]
+      if (cached) return cached
+      try {
+        const u = userFromApi(await api.getUser(id))
+        mergeUsers([u])
+        return u
+      } catch {
+        return null
+      }
+    },
+    [mergeUsers, state.users],
+  )
 
   const userById = useCallback(
     (id: string): User | null => {
-      if (id === 'me') return state.me
-      return state.contacts.find((c) => c.id === id) ?? null
+      if (state.me && (id === 'me' || id === state.me.id)) return state.me
+      return state.users[id] ?? null
     },
-    [state.me, state.contacts],
+    [state.me, state.users],
   )
 
   const peerOf = useCallback(
     (chat: Chat): User | null => {
       if (chat.kind !== 'dm') return null
-      const otherId = chat.participants.find((p) => p !== 'me')
+      const me = state.me
+      const otherId = chat.participants.find((p) => !me || p !== me.id)
       if (!otherId) return null
       return userById(otherId)
     },
-    [userById],
+    [userById, state.me],
   )
+
+  const searchUsers = useCallback(async (q: string) => {
+    if (!q.trim()) return []
+    const users = (await api.searchUsers(q)).map(userFromApi)
+    mergeUsers(users)
+    return users
+  }, [mergeUsers])
 
   const value = useMemo<Ctx>(
     () => ({
       state,
       setLang,
       setPrefs,
-      completeOnboarding,
+      signup,
+      login,
       logout,
       sendMessage,
-      addChat,
+      createChat,
       pinChat,
+      muteChat,
+      deleteChat,
       addEvent,
       updateEvent,
       deleteEvent,
@@ -257,20 +535,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
       toggleLike,
       repost,
       updateMe,
-      updateContact,
-      resetAll,
-      peerOf,
+      loadUser,
       userById,
+      peerOf,
+      searchUsers,
+      refresh,
+      addIncomingMessage,
     }),
     [
       state,
       setLang,
       setPrefs,
-      completeOnboarding,
+      signup,
+      login,
       logout,
       sendMessage,
-      addChat,
+      createChat,
       pinChat,
+      muteChat,
+      deleteChat,
       addEvent,
       updateEvent,
       deleteEvent,
@@ -281,15 +564,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
       toggleLike,
       repost,
       updateMe,
-      updateContact,
-      resetAll,
-      peerOf,
+      loadUser,
       userById,
+      peerOf,
+      searchUsers,
+      refresh,
+      addIncomingMessage,
     ],
   )
 
   return <AppCtx.Provider value={value}>{children}</AppCtx.Provider>
 }
+
+function sortChats(a: Chat, b: Chat): number {
+  if (a.pinned && !b.pinned) return -1
+  if (!a.pinned && b.pinned) return 1
+  return (b.updatedAt ?? 0) - (a.updatedAt ?? 0)
+}
+
+export { AppCtx }
 
 // eslint-disable-next-line react-refresh/only-export-components
 export function useApp(): Ctx {

@@ -217,22 +217,10 @@ function FoldersSection() {
 
 /* ------------ ADVANCED ------------ */
 function AdvancedSection() {
-  const { state, resetAll } = useApp()
+  const { state } = useApp()
   const lang = state.lang
   return (
     <div>
-      <SectionHeader text={t('settings.dataUsage', lang)} />
-      <button
-        className="row-press flex w-full items-center justify-between border-b border-line px-4 py-3 text-left"
-        onClick={() => {
-          if (window.confirm(`${t('settings.reset', lang)}?`)) resetAll()
-        }}
-      >
-        <div>
-          <div className="font-bold">{t('settings.reset', lang)}</div>
-          <div className="text-xs text-muted">Wipe chats, notes, events, posts</div>
-        </div>
-      </button>
       <SectionHeader text={t('settings.language', lang)} />
       <div className="flex gap-2 p-4">
         {(['en', 'ru'] as const).map((code) => (

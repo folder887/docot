@@ -145,7 +145,7 @@ export function CalendarScreen() {
       </div>
 
       {dayEvents.length === 0 ? (
-        <p className="px-6 pb-8 text-sm text-black/60">{t('calendar.empty', state.lang)}</p>
+        <p className="px-6 pb-8 text-sm text-muted">{t('empty.events', state.lang)}</p>
       ) : (
         <ul className="flex flex-col gap-2 px-4 pb-8">
           {dayEvents.map((ev) => (
@@ -177,7 +177,7 @@ export function CalendarScreen() {
                 <button
                   aria-label="Delete"
                   className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-black"
-                  onClick={() => deleteEvent(ev.id)}
+                  onClick={() => void deleteEvent(ev.id)}
                 >
                   <IconTrash size={14} />
                 </button>
@@ -193,11 +193,7 @@ export function CalendarScreen() {
           lang={state.lang}
           onClose={() => setComposerOpen(false)}
           onSave={(data) => {
-            if (editing) {
-              updateEvent(editing.id, data)
-            } else {
-              addEvent(data)
-            }
+            void (editing ? updateEvent(editing.id, data) : addEvent(data))
             setComposerOpen(false)
           }}
         />

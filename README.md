@@ -1,73 +1,54 @@
-# React + TypeScript + Vite
+# docot — all in one
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A black-and-white, mobile-first "all in one" messenger combining chats,
+calendar, Obsidian-style notes and a Twitter-like news feed.
 
-Currently, two official plugins are available:
+- Live: https://dist-thdbbhmb.devinapps.com
+- Backend: https://docot-backend-wvkjcktl.fly.dev
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Tech
 
-## React Compiler
+- **Frontend**: React 19, Vite, TypeScript, Tailwind, React Router
+- **Backend**: FastAPI, SQLAlchemy, SQLite, JWT, WebSockets ([backend/](./backend))
+- Real-time chat via WebSocket per chat
+- JWT auth (handle + password) stored in `localStorage`
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+## Run locally
 
-## Expanding the ESLint configuration
+Backend:
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```
+cd backend
+uv venv && uv pip install -e .
+JWT_SECRET=dev DATABASE_URL=sqlite:///./docot.db uvicorn app.main:app --reload --port 8000
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Frontend:
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
 ```
+npm install
+VITE_API_URL=http://127.0.0.1:8000 npm run dev
+```
+
+Production build:
+
+```
+VITE_API_URL=https://docot-backend-wvkjcktl.fly.dev npm run build
+```
+
+## Layout
+
+- **Chats** — DMs, search users, create chat, WS live delivery
+- **Calendar** — month grid, agenda, add/edit/delete events
+- **Notes** — markdown editor with `[[wiki-links]]`, force-directed graph
+- **News** — Twitter-style feed, like/repost/reply
+- **Menu / Settings** — themes (light/dark/paper/inverse), wallpapers, i18n (EN/RU),
+  profile, notifications, privacy, folders, advanced, speakers, battery
+- **Profile** — user/group/channel profile screens with contact/block actions
+
+## Deployment
+
+- Frontend built to `dist/` and served as a static bundle (devinapps).
+- Backend on Fly.io with a persistent volume at `/data/docot.db`.
+
+See [`backend/README.md`](./backend/README.md) for backend details.

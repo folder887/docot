@@ -5,19 +5,75 @@ import { relTime, t } from '../i18n'
 import { ScreenHeader } from '../components/ScreenHeader'
 import { Avatar } from '../components/Avatar'
 import { IconSend } from '../components/Icons'
+import { api, getToken, openChatWebSocket } from '../api'
+import type { Message } from '../types'
 
 export function ChatDetailScreen() {
   const { id } = useParams<{ id: string }>()
-  const { state, sendMessage, peerOf, userById } = useApp()
+  const { state, sendMessage, peerOf, userById, loadUser, addIncomingMessage } = useApp()
   const navigate = useNavigate()
   const chat = useMemo(() => state.chats.find((c) => c.id === id), [id, state.chats])
   const peer = chat ? peerOf(chat) : null
   const [text, setText] = useState('')
   const endRef = useRef<HTMLDivElement>(null)
+  const myId = state.me?.id
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [chat?.messages.length])
+
+  // pre-load any unknown participants so bubbles render author name/avatar
+  useEffect(() => {
+    if (!chat) return
+    for (const pid of chat.participants) {
+      if (!state.users[pid] && pid !== state.me?.id) void loadUser(pid)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chat?.id])
+
+  // load full message history once on open
+  useEffect(() => {
+    if (!id) return
+    void api
+      .getChat(id)
+      .then((full) => {
+        for (const m of full.messages) {
+          addIncomingMessage(id, m)
+        }
+      })
+      .catch(() => {
+        /* ignore */
+      })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id])
+
+  // live websocket: accept new messages from others
+  useEffect(() => {
+    if (!chat) return
+    const tok = getToken()
+    if (!tok) return
+    const ws = openChatWebSocket(chat.id, tok)
+    ws.onmessage = (ev) => {
+      try {
+        const data = JSON.parse(ev.data) as { type: string; message?: Message }
+        if (data.type === 'message' && data.message) {
+          if (data.message.authorId !== myId) {
+            addIncomingMessage(chat.id, data.message)
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    return () => {
+      try {
+        ws.close()
+      } catch {
+        /* ignore */
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chat?.id])
 
   if (!chat) {
     return (
@@ -48,7 +104,7 @@ export function ChatDetailScreen() {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-paper">
+    <div className="flex min-h-0 flex-1 flex-col bg-paper">
       <ScreenHeader
         title={
           <button
@@ -66,7 +122,7 @@ export function ChatDetailScreen() {
       <div className="chat-wallpaper flex flex-1 flex-col gap-2 overflow-y-auto px-3 py-4">
         <div className="wallpaper" />
         {chat.messages.map((m, i) => {
-          const mine = m.authorId === 'me'
+          const mine = m.authorId === myId
           const author = userById(m.authorId)
           const showAvatar = !mine && chat.kind !== 'dm' && (i === 0 || chat.messages[i - 1].authorId !== m.authorId)
           return (
@@ -108,8 +164,9 @@ export function ChatDetailScreen() {
         className="flex items-end gap-2 border-t-2 border-ink bg-paper px-3 py-2"
         onSubmit={(e) => {
           e.preventDefault()
-          sendMessage(chat.id, text)
+          const t0 = text
           setText('')
+          void sendMessage(chat.id, t0)
         }}
       >
         <textarea
@@ -121,8 +178,9 @@ export function ChatDetailScreen() {
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault()
-              sendMessage(chat.id, text)
+              const t0 = text
               setText('')
+              void sendMessage(chat.id, t0)
             }
           }}
         />
