@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type {
   ApiChat,
@@ -277,6 +277,12 @@ function emptyState(lang: Lang, prefs: Prefs, status: Status): AppState {
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AppState>(() => emptyState(loadLang(), loadPrefs(), 'loading'))
+  // Mirror of `state.chats` for use in stable callbacks without inflating
+  // dependency arrays.
+  const chatsRef = useRef(state.chats)
+  useEffect(() => {
+    chatsRef.current = state.chats
+  }, [state.chats])
 
   // persist prefs + lang
   useEffect(() => {
@@ -539,7 +545,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const addIncomingMessage = useCallback(
     async (chatId: string, msg: Message) => {
       let final = msg
-      if (isEncryptedEnvelope(msg.text) && state.me) {
+      // Only DM chats are E2E-encrypted; group/channel ciphertext (if any)
+      // is not for us — treat it as plaintext to avoid corrupting state with
+      // empty-string decrypt failures.
+      const chat = chatsRef.current.find((c) => c.id === chatId)
+      const isDm = chat?.kind === 'dm'
+      if (isDm && isEncryptedEnvelope(msg.text) && state.me) {
         if (msg.authorId === state.me.id) {
           // Our own outgoing ciphertext — we never had the key, restore from
           // the local plaintext cache populated at send time.

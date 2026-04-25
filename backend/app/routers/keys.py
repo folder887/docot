@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -150,14 +150,10 @@ def _add_one_time_keys(user_id: str, keys: list[PreKeyOut], db: Session) -> None
 
 def _status(user_id: str, db: Session) -> KeyStatusOut:
     has = _bundle_row_for(user_id, db) is not None
-    remaining = (
-        db.execute(
-            select(OneTimePreKey).where(
-                OneTimePreKey.user_id == user_id,
-                OneTimePreKey.consumed.is_(False),
-            )
+    remaining = db.execute(
+        select(func.count(OneTimePreKey.id)).where(
+            OneTimePreKey.user_id == user_id,
+            OneTimePreKey.consumed.is_(False),
         )
-        .scalars()
-        .all()
-    )
-    return KeyStatusOut(hasBundle=has, oneTimeRemaining=len(remaining))
+    ).scalar_one()
+    return KeyStatusOut(hasBundle=has, oneTimeRemaining=remaining)

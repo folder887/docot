@@ -52,16 +52,23 @@ export function ChatDetailScreen() {
 
   useEffect(() => {
     if (!id) return
-    void api
-      .getChat(id)
-      .then((full) => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const full = await api.getChat(id)
+        // Serialize: Signal Double Ratchet decryption mutates session state,
+        // so concurrent decrypts of messages from the same peer would race.
         for (const m of full.messages) {
-          addIncomingMessage(id, m)
+          if (cancelled) return
+          await addIncomingMessage(id, m)
         }
-      })
-      .catch(() => {
+      } catch {
         /* ignore */
-      })
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
@@ -70,6 +77,8 @@ export function ChatDetailScreen() {
     const tok = getToken()
     if (!tok) return
     const ws = openChatWebSocket(chat.id, tok)
+    // Serialize WS-driven decryption to avoid concurrent ratchet mutations.
+    let queue: Promise<void> = Promise.resolve()
     ws.onmessage = (ev) => {
       try {
         const data = JSON.parse(ev.data) as {
@@ -80,7 +89,8 @@ export function ChatDetailScreen() {
         }
         if (data.type === 'message' && data.message) {
           if (data.message.authorId !== myId) {
-            addIncomingMessage(chat.id, data.message)
+            const incoming = data.message
+            queue = queue.then(() => addIncomingMessage(chat.id, incoming))
           }
         } else if (data.type === 'message_edited' && data.message) {
           applyMessageEdit(chat.id, data.message)
