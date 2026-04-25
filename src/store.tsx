@@ -467,13 +467,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const chat = chatsRef.current.find((c) => c.id === chatId)
     if (chat?.kind === 'dm' && isEncryptedEnvelope(msg.text) && state.me) {
       if (msg.authorId === state.me.id) {
+        // Our own edit is also written to the outgoing cache by editMessage,
+        // so this picks up the new plaintext (not the pre-edit one).
         const cached = await recallOutgoing(msg.id)
         final = { ...msg, text: cached ?? '' }
       } else {
-        const cachedIn = await recallIncoming(msg.id)
-        const plain =
-          cachedIn !== undefined ? cachedIn : await maybeDecrypt(msg.authorId, msg.text)
-        if (cachedIn === undefined && plain) {
+        // Incoming edits change the ciphertext but reuse the original
+        // message id, so the cached incoming plaintext is stale. Always
+        // re-decrypt and refresh the cache.
+        const plain = await maybeDecrypt(msg.authorId, msg.text)
+        if (plain) {
           rememberIncoming(msg.id, plain).catch(() => {})
         }
         final = { ...msg, text: plain }
