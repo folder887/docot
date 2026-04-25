@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useApp } from '../store'
 import { relTime, t } from '../i18n'
 import { ScreenHeader } from '../components/ScreenHeader'
 import { Avatar } from '../components/Avatar'
-import { IconSend } from '../components/Icons'
+import { ChatComposer } from '../components/ChatComposer'
+import { MessageContent } from '../components/MessageBubble'
 import { api, getToken, openChatWebSocket } from '../api'
 import type { Message } from '../types'
 
@@ -14,7 +15,6 @@ export function ChatDetailScreen() {
   const navigate = useNavigate()
   const chat = useMemo(() => state.chats.find((c) => c.id === id), [id, state.chats])
   const peer = chat ? peerOf(chat) : null
-  const [text, setText] = useState('')
   const endRef = useRef<HTMLDivElement>(null)
   const myId = state.me?.id
 
@@ -150,7 +150,7 @@ export function ChatDetailScreen() {
                     {author.name}
                   </button>
                 )}
-                <p className="whitespace-pre-wrap break-words">{m.text}</p>
+                <MessageContent text={m.text} />
                 <div className={`mt-1 text-right text-[10px] opacity-70`}>
                   {relTime(m.at, state.lang)}
                 </div>
@@ -160,38 +160,7 @@ export function ChatDetailScreen() {
         })}
         <div ref={endRef} />
       </div>
-      <form
-        className="flex items-end gap-2 border-t-2 border-ink bg-paper px-3 py-2"
-        onSubmit={(e) => {
-          e.preventDefault()
-          const t0 = text
-          setText('')
-          void sendMessage(chat.id, t0)
-        }}
-      >
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          rows={1}
-          placeholder={t('chat.placeholder', state.lang)}
-          className="max-h-32 min-h-[44px] flex-1 resize-none rounded-2xl border-2 border-ink bg-paper px-4 py-2.5 text-base text-ink focus:outline-none"
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault()
-              const t0 = text
-              setText('')
-              void sendMessage(chat.id, t0)
-            }
-          }}
-        />
-        <button
-          type="submit"
-          aria-label={t('chat.send', state.lang)}
-          className="flex h-11 w-11 items-center justify-center rounded-full border-2 border-ink bg-ink text-paper"
-        >
-          <IconSend size={20} />
-        </button>
-      </form>
+      <ChatComposer onSend={(t0) => void sendMessage(chat.id, t0)} />
     </div>
   )
 }

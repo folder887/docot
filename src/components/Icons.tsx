@@ -299,3 +299,90 @@ export function IconQR({ size = 18, className, stroke = 2 }: IconProps) {
     </svg>
   )
 }
+
+export function IconMic({ size = 22, className, stroke = 2 }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} stroke="currentColor" strokeWidth={stroke} fill="none" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="9" y="3" width="6" height="11" rx="3" />
+      <path d="M5 11a7 7 0 0 0 14 0" />
+      <path d="M12 18v3" />
+    </svg>
+  )
+}
+
+export function IconPaperclip({ size = 22, className, stroke = 2 }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} stroke="currentColor" strokeWidth={stroke} fill="none" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21.5 11.5 12 21a5 5 0 0 1-7-7L14 5a3.5 3.5 0 0 1 5 5l-9 9a2 2 0 0 1-3-3l8-8" />
+    </svg>
+  )
+}
+
+export function IconStop({ size = 22, className }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} fill="currentColor">
+      <rect x="6" y="6" width="12" height="12" rx="2" />
+    </svg>
+  )
+}
+
+export function IconPlay({ size = 18, className }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} fill="currentColor">
+      <path d="M7 5v14l12-7-12-7z" />
+    </svg>
+  )
+}
+
+export function IconPause({ size = 18, className }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} fill="currentColor">
+      <rect x="6" y="5" width="4" height="14" />
+      <rect x="14" y="5" width="4" height="14" />
+    </svg>
+  )
+}
+
+export function IconBold({ size = 18, className }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} stroke="currentColor" strokeWidth={2.5} fill="none" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M7 5h6a3.5 3.5 0 0 1 0 7H7zM7 12h7a3.5 3.5 0 0 1 0 7H7z" />
+    </svg>
+  )
+}
+
+export function IconItalic({ size = 18, className }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} stroke="currentColor" strokeWidth={2} fill="none" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M14 4h-5M15 20h-5M15 4l-6 16" />
+    </svg>
+  )
+}
+
+export function IconStrike({ size = 18, className }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} stroke="currentColor" strokeWidth={2} fill="none" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 12h16" />
+      <path d="M16 6a4 4 0 0 0-8 0c0 2 2 3 4 4M8 18a4 4 0 0 0 8 0c0-1.4-1-2.4-2.5-3" />
+    </svg>
+  )
+}
+
+export function IconCode({ size = 18, className }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} stroke="currentColor" strokeWidth={2} fill="none" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="9 8 5 12 9 16" />
+      <polyline points="15 8 19 12 15 16" />
+    </svg>
+  )
+}
+
+export function IconImage({ size = 22, className, stroke = 2 }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} stroke="currentColor" strokeWidth={stroke} fill="none" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <circle cx="8.5" cy="8.5" r="1.5" />
+      <path d="m21 15-5-5L5 21" />
+    </svg>
+  )
+}

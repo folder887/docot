@@ -212,6 +212,33 @@ export const api = {
     }),
   deleteFolder: (id: string) =>
     request<{ ok: boolean }>(`/folders/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+
+  // uploads
+  uploadFile: async (file: Blob, filename = 'file'): Promise<ApiUpload> => {
+    const fd = new FormData()
+    fd.append('file', file, filename)
+    const headers = new Headers()
+    const token = getToken()
+    if (token) headers.set('authorization', `Bearer ${token}`)
+    const res = await fetch(`${API_URL}/uploads`, { method: 'POST', body: fd, headers })
+    if (!res.ok) throw new ApiError(res.status, res.statusText)
+    return (await res.json()) as ApiUpload
+  },
+}
+
+export type ApiUpload = {
+  id: string
+  name: string
+  url: string
+  size: number
+  type: string
+  ownerId: string
+}
+
+export function uploadUrl(path: string): string {
+  if (!path) return ''
+  if (path.startsWith('http')) return path
+  return `${API_URL}${path.startsWith('/') ? '' : '/'}${path}`
 }
 
 export function openChatWebSocket(chatId: string, token: string): WebSocket {

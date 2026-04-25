@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
 from .db import Base, engine
-from .routers import auth, chats, events, folders, notes, posts, users
+from .routers import auth, chats, events, folders, notes, posts, uploads, users
 
 
 def create_app() -> FastAPI:
@@ -33,6 +33,7 @@ def create_app() -> FastAPI:
     app.include_router(events.router)
     app.include_router(posts.router)
     app.include_router(folders.router)
+    app.include_router(uploads.router)
     return app
 
 

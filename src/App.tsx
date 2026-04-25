@@ -16,7 +16,7 @@ import { SettingsScreen } from './screens/SettingsScreen'
 import { SettingsSubScreen } from './screens/SettingsSubScreens'
 import { ProfileScreen } from './screens/ProfileScreen'
 import { GroupInfoScreen } from './screens/GroupInfoScreen'
-import { TabBar } from './components/TabBar'
+import { TabBar, DesktopSidebar } from './components/TabBar'
 import { TopBar } from './components/TopBar'
 
 const TOP_TAB_ROUTES = ['/chats', '/calendar', '/notes', '/news', '/menu']
@@ -50,6 +50,7 @@ function Shell() {
 
   return (
     <div className="app-shell flex flex-col">
+      {!hideChrome && <DesktopSidebar />}
       {!hideChrome && isTopTab && <TopBar />}
       <main className="flex flex-1 flex-col min-h-0">
         <div key={key} className="page-enter flex flex-1 flex-col min-h-0">

@@ -6,6 +6,7 @@ import { Avatar } from '../components/Avatar'
 import { IconChat, IconChannel, IconFolder, IconPin, IconPlus, IconUser } from '../components/Icons'
 import { Modal, PromptDialog, ConfirmDialog } from '../components/Modal'
 import type { Chat, ChatFolder as ChatFolderT, User } from '../types'
+import { decodeMedia } from '../messageMedia'
 
 const SYSTEM_FOLDERS = [
   { id: 'all', labelKey: 'chats.all' },
@@ -667,6 +668,17 @@ function FolderChatPicker({
   )
 }
 
+function lastMessagePreview(text: string, lang: 'en' | 'ru'): string {
+  if (!text) return ''
+  const m = decodeMedia(text)
+  if (!m) return text
+  if (m.kind === 'voice') return lang === 'ru' ? '🎙 Голосовое' : '🎙 Voice message'
+  if (m.kind === 'image') return lang === 'ru' ? '🖼 Изображение' : '🖼 Image'
+  if (m.kind === 'video') return lang === 'ru' ? '🎬 Видео' : '🎬 Video'
+  if (m.kind === 'file') return lang === 'ru' ? `📎 ${m.n ?? 'Файл'}` : `📎 ${m.n ?? 'File'}`
+  return text
+}
+
 function ChatRow({ chat, lang }: { chat: Chat; lang: 'en' | 'ru' }) {
   const last = chat.lastMessage ?? chat.messages[chat.messages.length - 1]
   return (
@@ -685,7 +697,7 @@ function ChatRow({ chat, lang }: { chat: Chat; lang: 'en' | 'ru' }) {
                 {chat.kind}
               </span>
             )}
-            <span className="truncate">{last?.text ?? ' '}</span>
+            <span className="truncate">{last ? lastMessagePreview(last.text, lang) : ' '}</span>
           </div>
         </div>
       </Link>

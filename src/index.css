@@ -198,6 +198,51 @@ select {
   }
 }
 
+/* Desktop layout: > 1024px, side-by-side sidebar + content */
+@media (min-width: 1024px) {
+  .app-shell {
+    max-width: 1280px;
+    height: 100svh;
+    min-height: 100svh;
+    overflow: hidden;
+    flex-direction: row !important;
+    border-left: 2px solid var(--ink);
+    border-right: 2px solid var(--ink);
+  }
+  .app-shell > .desktop-sidebar {
+    width: 240px;
+    flex-shrink: 0;
+    border-right: 2px solid var(--ink);
+    background: var(--paper);
+    display: flex;
+    flex-direction: column;
+  }
+  .app-shell > main {
+    flex: 1;
+    min-width: 0;
+    height: 100svh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .app-shell > main > div {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+  /* Hide bottom tab bar on desktop */
+  .app-shell > nav.tabbar-bottom {
+    display: none;
+  }
+}
+
+/* Hide desktop sidebar on mobile */
+@media (max-width: 1023px) {
+  .desktop-sidebar {
+    display: none !important;
+  }
+}
+
 /* Page transitions */
 @keyframes page-in {
   from {
