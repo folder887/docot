@@ -10,6 +10,7 @@ import { Modal, ConfirmDialog } from '../components/Modal'
 import { IconLock } from '../components/Icons'
 import { api, getToken, openChatWebSocket } from '../api'
 import type { Message } from '../types'
+import { recallOutgoing } from '../crypto/outgoing'
 
 export function ChatDetailScreen() {
   const { id } = useParams<{ id: string }>()
@@ -88,10 +89,18 @@ export function ChatDetailScreen() {
           deletedAt?: number
         }
         if (data.type === 'message' && data.message) {
-          if (data.message.authorId !== myId) {
-            const incoming = data.message
-            queue = queue.then(() => addIncomingMessage(chat.id, incoming))
-          }
+          const incoming = data.message
+          // Skip the WebSocket echo of our own send: either the server
+          // confirmed authorship (regular message) or we have the plaintext
+          // cached locally (sealed message — the server stripped authorId).
+          // Without this, the sealed echo bypasses the dedupe path and races
+          // sendMessage's setState commit, overwriting our message with an
+          // empty body when the ratchet refuses to decrypt our own send.
+          queue = queue.then(async () => {
+            if (incoming.authorId === myId) return
+            if (incoming.sealed && (await recallOutgoing(incoming.id)) !== undefined) return
+            await addIncomingMessage(chat.id, incoming)
+          })
         } else if (data.type === 'message_edited' && data.message) {
           const edited = data.message
           queue = queue.then(() => applyMessageEdit(chat.id, edited))

@@ -68,6 +68,32 @@ export function isEncryptedEnvelope(text: string): boolean {
   )
 }
 
+/** Best-effort extraction of the sender's deviceId from a multi-device
+ * envelope. Legacy envelopes implicitly use device 1; malformed payloads
+ * return null so callers can fall back. */
+export function envelopeSenderDeviceId(text: string): number | null {
+  if (text.startsWith(ENVELOPE_PREFIX_LEGACY)) return LEGACY_DEVICE_ID
+  const env = decodeMulti(text)
+  return env ? env.s : null
+}
+
+/** True iff the sealed envelope's sender deviceId is one of *our* devices —
+ * i.e. it was sent from a sibling browser/install of the same account. We use
+ * this to distinguish self-sync messages (we are the author) from peer sends.
+ * Errors and missing data conservatively return false so the caller falls
+ * back to attributing the message to the DM peer.
+ */
+export async function isOwnEnvelope(myId: string, text: string): Promise<boolean> {
+  try {
+    const senderDevice = envelopeSenderDeviceId(text)
+    if (senderDevice === null) return false
+    const myDevices = await listDevicesSafe(myId)
+    return myDevices.includes(senderDevice)
+  } catch {
+    return false
+  }
+}
+
 function decodeMulti(text: string): MultiEnvelope | null {
   if (!text.startsWith(ENVELOPE_PREFIX_MULTI)) return null
   try {

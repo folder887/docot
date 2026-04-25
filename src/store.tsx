@@ -23,7 +23,12 @@ import type {
 } from './types'
 import { defaultPrefs } from './types'
 import { ensureIdentity } from './crypto/identity'
-import { encryptForUser, isEncryptedEnvelope, maybeDecrypt } from './crypto/session'
+import {
+  encryptForUser,
+  isEncryptedEnvelope,
+  isOwnEnvelope,
+  maybeDecrypt,
+} from './crypto/session'
 import { idbClearAll } from './crypto/idb'
 import {
   recallIncoming,
@@ -149,6 +154,33 @@ function deanonymise(me: User, chatLike: { kind: string; participants: string[] 
   return { ...m, authorId: other }
 }
 
+// In-flight decrypt registry — avoids double-advancing the Signal ratchet
+// when `decryptHistory` and `addIncomingMessage` race for the same message
+// id (e.g. the chat-list `lastMessage` preview decryption running in parallel
+// with the chat detail screen's history walk). The Map holds a single
+// pending Promise<string> per message; concurrent callers all await that one
+// resolution rather than each calling `decryptWhisperMessage` separately.
+const inflightDecrypts = new Map<string, Promise<string>>()
+
+function decryptOnce(
+  messageId: string,
+  myId: string,
+  authorId: string,
+  text: string,
+): Promise<string> {
+  const existing = inflightDecrypts.get(messageId)
+  if (existing) return existing
+  const pending = (async () => {
+    try {
+      return await maybeDecrypt(myId, authorId, text)
+    } finally {
+      inflightDecrypts.delete(messageId)
+    }
+  })()
+  inflightDecrypts.set(messageId, pending)
+  return pending
+}
+
 /** Resolve a single (possibly-encrypted) message to its plaintext form using
  * the local caches and, for peer messages, the Signal session. */
 async function resolvePlaintext(
@@ -161,13 +193,13 @@ async function resolvePlaintext(
     const cached = await recallOutgoing(m.id)
     if (cached !== undefined) return { ...m, text: cached }
     // Sibling-device path: decrypt the self-sync entry and seed cache.
-    const plain = await maybeDecrypt(me.id, me.id, m.text)
+    const plain = await decryptOnce(m.id, me.id, me.id, m.text)
     if (plain) rememberOutgoing(m.id, plain).catch(() => {})
     return { ...m, text: plain }
   }
   const cachedIn = await recallIncoming(m.id)
   if (cachedIn !== undefined) return { ...m, text: cachedIn }
-  const plain = await maybeDecrypt(me.id, peerId, m.text)
+  const plain = await decryptOnce(m.id, me.id, peerId, m.text)
   if (plain) {
     rememberIncoming(m.id, plain).catch(() => {})
   }
@@ -497,7 +529,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const applyMessageEdit = useCallback(async (chatId: string, msg: Message) => {
     const chat = chatsRef.current.find((c) => c.id === chatId)
-    const incoming = state.me ? deanonymise(state.me, chat, msg) : msg
+    let attributed = msg
+    if (state.me && msg.sealed && !msg.authorId && isEncryptedEnvelope(msg.text)) {
+      if (await isOwnEnvelope(state.me.id, msg.text)) {
+        attributed = { ...msg, authorId: state.me.id }
+      }
+    }
+    const incoming = state.me ? deanonymise(state.me, chat, attributed) : attributed
     let final = incoming
     if (chat?.kind === 'dm' && isEncryptedEnvelope(incoming.text) && state.me) {
       if (incoming.authorId === state.me.id) {
@@ -509,7 +547,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (cached !== undefined) {
           final = { ...incoming, text: cached }
         } else {
-          const plain = await maybeDecrypt(
+          const plain = await decryptOnce(
+            incoming.id,
             state.me.id,
             incoming.authorId,
             incoming.text,
@@ -521,7 +560,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // Incoming edits change the ciphertext but reuse the original
         // message id, so the cached incoming plaintext is stale. Always
         // re-decrypt and refresh the cache.
-        const plain = await maybeDecrypt(
+        const plain = await decryptOnce(
+          incoming.id,
           state.me.id,
           incoming.authorId,
           incoming.text,
@@ -641,10 +681,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // is not for us — treat it as plaintext to avoid corrupting state with
       // empty-string decrypt failures.
       const chat = chatsRef.current.find((c) => c.id === chatId)
-      // Sealed-sender messages arrive with authorId="" — re-derive from the
-      // chat membership before any further processing, otherwise we can't
-      // tell our own send from a peer's send and cache lookups break.
-      const incoming = state.me ? deanonymise(state.me, chat, msg) : msg
+      // Sealed-sender messages arrive with authorId="". Two possibilities:
+      // (a) sent by a peer — attribute to the other DM participant; (b) sent
+      // by one of our own sibling devices — attribute to me. We detect (b)
+      // by inspecting the envelope's sender deviceId against the list of
+      // devices registered under our account.
+      let attributed = msg
+      if (state.me && msg.sealed && !msg.authorId && isEncryptedEnvelope(msg.text)) {
+        if (await isOwnEnvelope(state.me.id, msg.text)) {
+          attributed = { ...msg, authorId: state.me.id }
+        }
+      }
+      const incoming = state.me ? deanonymise(state.me, chat, attributed) : attributed
       let final = incoming
       const isDm = chat?.kind === 'dm'
       if (isDm && isEncryptedEnvelope(incoming.text) && state.me) {
@@ -656,7 +704,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           if (cached !== undefined) {
             final = { ...incoming, text: cached }
           } else {
-            const plain = await maybeDecrypt(
+            const plain = await decryptOnce(
+              incoming.id,
               state.me.id,
               incoming.authorId,
               incoming.text,
@@ -669,7 +718,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
           const plain =
             cached !== undefined
               ? cached
-              : await maybeDecrypt(state.me.id, incoming.authorId, incoming.text)
+              : await decryptOnce(
+                  incoming.id,
+                  state.me.id,
+                  incoming.authorId,
+                  incoming.text,
+                )
           if (cached === undefined && plain) {
             rememberIncoming(incoming.id, plain).catch(() => {})
           }
