@@ -4,6 +4,7 @@ import { useApp } from '../store'
 import { relTime, t } from '../i18n'
 import { ScreenHeader } from '../components/ScreenHeader'
 import { Avatar } from '../components/Avatar'
+import { Modal, ConfirmDialog } from '../components/Modal'
 import { api } from '../api'
 import type { User } from '../types'
 import {
@@ -26,6 +27,11 @@ export function ProfileScreen() {
   const isMe = id === 'me' || (me && id === me.id)
   const [user, setUser] = useState<User | null>(() => (id ? userById(id) : null))
   const [acting, setActing] = useState(false)
+  const [showMore, setShowMore] = useState(false)
+  const [showQR, setShowQR] = useState(false)
+  const [showCall, setShowCall] = useState(false)
+  const [confirmBlock, setConfirmBlock] = useState(false)
+  const [copied, setCopied] = useState(false)
 
   useEffect(() => {
     if (!id) return
@@ -102,14 +108,26 @@ export function ProfileScreen() {
     }
   }
 
+  const copyHandle = async () => {
+    if (!user.handle) return
+    try {
+      await navigator.clipboard.writeText(`@${user.handle}`)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1500)
+    } catch {
+      /* ignore */
+    }
+  }
+
   return (
     <div className="flex min-h-0 flex-col bg-paper">
       <ScreenHeader
         title={isMe ? t('settings.myAccount', state.lang) : ''}
         right={
           <button
-            aria-label="More"
+            aria-label={t('profile.more', state.lang)}
             className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-ink"
+            onClick={() => setShowMore(true)}
           >
             <IconMoreH size={18} />
           </button>
@@ -133,21 +151,27 @@ export function ProfileScreen() {
             label={state.prefs.muteAll ? t('profile.unmute', state.lang) : t('profile.mute', state.lang)}
           />
           <ActionButton
-            onClick={() => window.alert('Calling…')}
+            onClick={() => setShowCall(true)}
             icon={<IconPhone size={20} />}
             label={t('profile.call', state.lang)}
           />
-          <ActionButton icon={<IconMoreH size={20} />} label={t('profile.more', state.lang)} />
+          <ActionButton
+            onClick={() => setShowMore(true)}
+            icon={<IconMoreH size={20} />}
+            label={t('profile.more', state.lang)}
+          />
         </div>
       )}
 
       <div className="mt-6 px-4">
         {user.handle && (
-          <InfoRow
-            label={t('profile.username', state.lang)}
-            value={user.handle}
-            right={<IconQR size={18} />}
-          />
+          <button onClick={() => setShowQR(true)} className="row-press w-full text-left">
+            <InfoRow
+              label={t('profile.username', state.lang)}
+              value={`@${user.handle}`}
+              right={<IconQR size={18} />}
+            />
+          </button>
         )}
         {user.phone && (
           <InfoRow label={t('profile.phone', state.lang)} value={user.phone} />
@@ -192,7 +216,7 @@ export function ProfileScreen() {
       {!isMe && (
         <div className="mx-4 mt-6">
           <button
-            onClick={toggleBlock}
+            onClick={() => (user.blocked ? toggleBlock() : setConfirmBlock(true))}
             className="flex w-full items-center gap-3 rounded-2xl border-2 border-ink bg-paper px-4 py-3 font-bold text-ink"
           >
             <IconBlock size={20} />
@@ -202,7 +226,125 @@ export function ProfileScreen() {
       )}
 
       <div className="h-10" />
+
+      {/* More actions sheet */}
+      <Modal open={showMore} onClose={() => setShowMore(false)} title={user.name}>
+        <ul className="flex flex-col gap-1 text-base font-bold">
+          {user.handle && (
+            <SheetRow
+              label={`${t('common.copy', state.lang)} @${user.handle}`}
+              onClick={() => {
+                void copyHandle()
+                setShowMore(false)
+              }}
+            />
+          )}
+          <SheetRow
+            label={t('profile.qr', state.lang)}
+            onClick={() => {
+              setShowMore(false)
+              setShowQR(true)
+            }}
+          />
+          {!isMe && kind === 'user' && (
+            <SheetRow
+              label={user.isContact ? t('profile.removeContact', state.lang) : t('profile.addContact', state.lang)}
+              onClick={() => {
+                setShowMore(false)
+                void toggleContact()
+              }}
+            />
+          )}
+          {!isMe && (
+            <SheetRow
+              destructive
+              label={user.blocked ? t('profile.unblock', state.lang) : t('profile.block', state.lang)}
+              onClick={() => {
+                setShowMore(false)
+                if (user.blocked) void toggleBlock()
+                else setConfirmBlock(true)
+              }}
+            />
+          )}
+        </ul>
+        <button
+          className="mt-3 w-full rounded-full border-2 border-ink py-2 text-sm font-bold"
+          onClick={() => setShowMore(false)}
+        >
+          {t('common.close', state.lang)}
+        </button>
+        {copied && (
+          <div className="mt-3 text-center text-xs uppercase tracking-wider text-muted">
+            {t('common.copied', state.lang)}
+          </div>
+        )}
+      </Modal>
+
+      {/* QR modal */}
+      <Modal open={showQR} onClose={() => setShowQR(false)} title={`@${user.handle ?? user.id}`}>
+        <div className="flex flex-col items-center gap-3">
+          <QRCode text={`https://docot.app/u/${user.handle ?? user.id}`} size={220} />
+          <p className="text-center text-xs text-muted">
+            {state.lang === 'ru' ? 'Поделись ником через QR' : 'Share this user via QR'}
+          </p>
+          <button
+            className="bw-btn-primary mt-2 w-full"
+            onClick={() => setShowQR(false)}
+          >
+            {t('common.close', state.lang)}
+          </button>
+        </div>
+      </Modal>
+
+      {/* Call screen */}
+      <CallScreen
+        open={showCall}
+        onClose={() => setShowCall(false)}
+        user={user}
+        lang={state.lang}
+      />
+
+      <ConfirmDialog
+        open={confirmBlock}
+        title={user.name}
+        message={
+          state.lang === 'ru'
+            ? `Заблокировать ${user.name}? Вы перестанете получать от него сообщения.`
+            : `Block ${user.name}? You will stop receiving messages.`
+        }
+        okLabel={t('profile.block', state.lang)}
+        cancelLabel={t('common.cancel', state.lang)}
+        destructive
+        onResolve={(ok) => {
+          setConfirmBlock(false)
+          if (ok) void toggleBlock()
+        }}
+      />
     </div>
+  )
+}
+
+function SheetRow({
+  label,
+  onClick,
+  destructive,
+}: {
+  label: string
+  onClick: () => void
+  destructive?: boolean
+}) {
+  return (
+    <li>
+      <button
+        className={`row-press flex w-full items-center justify-between rounded-2xl border-2 border-ink px-4 py-3 text-left ${
+          destructive ? 'bg-paper text-ink' : 'bg-paper text-ink'
+        }`}
+        onClick={onClick}
+      >
+        <span>{label}</span>
+        <IconChevron size={16} />
+      </button>
+    </li>
   )
 }
 
@@ -244,6 +386,134 @@ function InfoRow({
         <div className="text-xs text-muted">{label}</div>
       </div>
       {right && <div className="pt-1 text-muted">{right}</div>}
+    </div>
+  )
+}
+
+/* ---------------- Inline QR generator (no external deps) ---------------- */
+function QRCode({ text, size = 200 }: { text: string; size?: number }) {
+  const matrix = useMemo(() => buildQR(text), [text])
+  const n = matrix.length
+  const cell = size / n
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox={`0 0 ${size} ${size}`}
+      className="rounded-xl"
+      style={{ background: 'var(--paper)' }}
+    >
+      <rect width={size} height={size} fill="var(--paper)" />
+      {matrix.map((row, y) =>
+        row.map((bit, x) =>
+          bit ? (
+            <rect
+              key={`${x}-${y}`}
+              x={x * cell}
+              y={y * cell}
+              width={cell}
+              height={cell}
+              fill="var(--ink)"
+            />
+          ) : null,
+        ),
+      )}
+    </svg>
+  )
+}
+
+/**
+ * Tiny QR-like code generator. Not a full ISO QR — produces a unique,
+ * deterministic black/white grid that visually looks like a QR code.
+ * Good enough for UI placeholder; users scan handle (which is shown in plaintext above).
+ */
+function buildQR(text: string): boolean[][] {
+  const N = 25
+  const grid: boolean[][] = Array.from({ length: N }, () => Array(N).fill(false))
+  // Simple xorshift seeded by text
+  let h = 2166136261
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i)
+    h = (h * 16777619) >>> 0
+  }
+  const rand = () => {
+    h ^= h << 13
+    h ^= h >>> 17
+    h ^= h << 5
+    h >>>= 0
+    return h / 0xffffffff
+  }
+  // Fill data area (avoid finder corners)
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      grid[y][x] = rand() > 0.5
+    }
+  }
+  // Three finder squares (TL / TR / BL)
+  const drawFinder = (cx: number, cy: number) => {
+    for (let dy = -3; dy <= 3; dy++) {
+      for (let dx = -3; dx <= 3; dx++) {
+        const x = cx + dx
+        const y = cy + dy
+        if (x < 0 || y < 0 || x >= N || y >= N) continue
+        const a = Math.max(Math.abs(dx), Math.abs(dy))
+        grid[y][x] = a !== 2 // border + center, gap at ring 2
+      }
+    }
+  }
+  drawFinder(3, 3)
+  drawFinder(N - 4, 3)
+  drawFinder(3, N - 4)
+  return grid
+}
+
+/* ---------------- Call screen (in-app overlay, replaces window.alert) ---------------- */
+function CallScreen({
+  open,
+  onClose,
+  user,
+  lang,
+}: {
+  open: boolean
+  onClose: () => void
+  user: User
+  lang: 'en' | 'ru'
+}) {
+  const [seconds, setSeconds] = useState(0)
+  useEffect(() => {
+    if (!open) return
+    const reset = window.setTimeout(() => setSeconds(0), 0)
+    const id = window.setInterval(() => setSeconds((s) => s + 1), 1000)
+    return () => {
+      window.clearTimeout(reset)
+      window.clearInterval(id)
+    }
+  }, [open])
+  if (!open) return null
+  const mm = String(Math.floor(seconds / 60)).padStart(2, '0')
+  const ss = String(seconds % 60).padStart(2, '0')
+  return (
+    <div
+      className="fixed inset-0 z-[70] flex flex-col items-center justify-between bg-ink py-12 text-paper"
+      style={{ paddingBottom: 'max(3rem, env(safe-area-inset-bottom))' }}
+    >
+      <div className="flex flex-col items-center gap-2 pt-8">
+        <div className="text-xs uppercase tracking-[0.3em] opacity-70">{t('call.title', lang)}</div>
+        <Avatar name={user.name} size={140} filled={false} />
+        <div className="italic-display mt-4 text-3xl">{user.name}</div>
+        <div className="font-mono text-lg opacity-80">{mm}:{ss}</div>
+        <div className="mt-2 max-w-[260px] text-center text-xs opacity-60">
+          {t('call.unavailable', lang)}
+        </div>
+      </div>
+      <button
+        onClick={onClose}
+        aria-label={t('call.tapToEnd', lang)}
+        className="flex h-20 w-20 items-center justify-center rounded-full"
+        style={{ background: 'var(--paper)', color: 'var(--ink)' }}
+      >
+        <IconPhone size={32} />
+      </button>
     </div>
   )
 }

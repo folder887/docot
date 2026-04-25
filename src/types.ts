@@ -74,6 +74,14 @@ export type NewsPost = {
   reposts: number
   replies: number
   liked?: boolean
+  reposted?: boolean
+}
+
+export type ChatFolder = {
+  id: string
+  name: string
+  sortOrder: number
+  chatIds: string[]
 }
 
 export const defaultPrefs: Prefs = {

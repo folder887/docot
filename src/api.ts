@@ -96,6 +96,14 @@ export type ApiPost = {
   reposts: number
   replies: number
   liked: boolean
+  reposted: boolean
+}
+
+export type ApiFolder = {
+  id: string
+  name: string
+  sortOrder: number
+  chatIds: string[]
 }
 
 /* API methods */
@@ -189,6 +197,21 @@ export const api = {
     request<ApiPost>('/posts', { method: 'POST', body: JSON.stringify({ text }) }),
   likePost: (id: string) => request<ApiPost>(`/posts/${encodeURIComponent(id)}/like`, { method: 'POST' }),
   repostPost: (id: string) => request<ApiPost>(`/posts/${encodeURIComponent(id)}/repost`, { method: 'POST' }),
+
+  // folders
+  listFolders: () => request<ApiFolder[]>('/folders'),
+  createFolder: (body: { name: string; chatIds?: string[] }) =>
+    request<ApiFolder>('/folders', {
+      method: 'POST',
+      body: JSON.stringify({ chatIds: [], ...body }),
+    }),
+  updateFolder: (id: string, patch: { name?: string; chatIds?: string[] }) =>
+    request<ApiFolder>(`/folders/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+  deleteFolder: (id: string) =>
+    request<{ ok: boolean }>(`/folders/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 }
 
 export function openChatWebSocket(chatId: string, token: string): WebSocket {

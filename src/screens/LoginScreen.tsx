@@ -36,15 +36,19 @@ export function LoginScreen() {
   }
 
   return (
-    <div className="flex h-full w-full flex-col bg-paper px-6 py-10 text-ink">
-      <div className="flex flex-col items-center">
+    <form
+      onSubmit={onSubmit}
+      className="flex h-full min-h-[100svh] w-full flex-col bg-paper text-ink"
+    >
+      <div className="flex flex-col items-center px-6 pt-10">
         <Logo size={64} />
         <div className="italic-display mt-3 text-2xl">docot</div>
         <div className="mt-1 text-xs uppercase tracking-[0.3em] text-muted">
           {t('auth.loginTitle', state.lang)}
         </div>
       </div>
-      <form className="mt-10 flex flex-1 flex-col gap-4" onSubmit={onSubmit}>
+
+      <div className="flex flex-1 flex-col gap-4 px-6 pt-10">
         <label className="flex flex-col gap-1 text-sm font-bold uppercase tracking-wide">
           {t('onboarding.handle', state.lang)}
           <input
@@ -68,15 +72,19 @@ export function LoginScreen() {
           />
         </label>
         {err && <div className="text-sm font-bold text-ink">{err}</div>}
-        <div className="mt-auto flex flex-col gap-3">
-          <button type="submit" disabled={!canSubmit} className="bw-btn-primary text-lg disabled:opacity-40">
-            {busy ? '…' : t('auth.login', state.lang)}
-          </button>
-          <Link to="/signup" className="text-center text-sm text-muted underline">
-            {t('auth.noAccount', state.lang)}
-          </Link>
-        </div>
-      </form>
-    </div>
+      </div>
+
+      <div
+        className="flex flex-col gap-3 px-6 pt-4"
+        style={{ paddingBottom: 'max(2.5rem, env(safe-area-inset-bottom))' }}
+      >
+        <button type="submit" disabled={!canSubmit} className="bw-btn-primary text-lg disabled:opacity-40">
+          {busy ? '…' : t('auth.login', state.lang)}
+        </button>
+        <Link to="/signup" className="text-center text-sm text-muted underline">
+          {t('auth.noAccount', state.lang)}
+        </Link>
+      </div>
+    </form>
   )
 }

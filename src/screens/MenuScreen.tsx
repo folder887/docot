@@ -16,7 +16,7 @@ export function MenuScreen() {
         <Avatar name={me?.name ?? '?'} size={64} />
         <div className="flex-1">
           <div className="text-lg font-black">{me?.name ?? '—'}</div>
-          <div className="text-sm text-muted">{me?.handle ?? ''}</div>
+          <div className="text-sm text-muted">{me?.handle ? `@${me.handle}` : ''}</div>
           {me?.bio && <div className="mt-1 line-clamp-2 text-xs text-muted">{me.bio}</div>}
         </div>
       </section>

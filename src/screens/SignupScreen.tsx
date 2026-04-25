@@ -38,8 +38,11 @@ export function SignupScreen() {
   }
 
   return (
-    <div className="flex h-full w-full flex-col bg-paper px-6 py-10 text-ink">
-      <div className="flex flex-col items-center">
+    <form
+      onSubmit={onSubmit}
+      className="flex h-full min-h-[100svh] w-full flex-col bg-paper text-ink"
+    >
+      <div className="flex flex-col items-center px-6 pt-10">
         <Logo size={64} />
         <div className="italic-display mt-3 text-2xl">docot</div>
         <div className="mt-1 text-xs uppercase tracking-[0.3em] text-muted">
@@ -47,7 +50,7 @@ export function SignupScreen() {
         </div>
       </div>
 
-      <form className="mt-10 flex flex-1 flex-col gap-4" onSubmit={onSubmit}>
+      <div className="flex flex-1 flex-col gap-4 px-6 pt-10">
         <Field label={t('onboarding.name', state.lang)}>
           <input
             autoFocus
@@ -78,16 +81,20 @@ export function SignupScreen() {
           />
         </Field>
         {err && <div className="text-sm font-bold text-ink">{err}</div>}
-        <div className="mt-auto flex flex-col gap-3">
-          <button type="submit" disabled={!canSubmit} className="bw-btn-primary text-lg disabled:opacity-40">
-            {busy ? '…' : t('onboarding.start', state.lang)}
-          </button>
-          <Link to="/login" className="text-center text-sm text-muted underline">
-            {t('auth.haveAccount', state.lang)}
-          </Link>
-        </div>
-      </form>
-    </div>
+      </div>
+
+      <div
+        className="flex flex-col gap-3 px-6 pt-4"
+        style={{ paddingBottom: 'max(2.5rem, env(safe-area-inset-bottom))' }}
+      >
+        <button type="submit" disabled={!canSubmit} className="bw-btn-primary text-lg disabled:opacity-40">
+          {busy ? '…' : t('onboarding.start', state.lang)}
+        </button>
+        <Link to="/login" className="text-center text-sm text-muted underline">
+          {t('auth.haveAccount', state.lang)}
+        </Link>
+      </div>
+    </form>
   )
 }
 

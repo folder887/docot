@@ -49,18 +49,14 @@ export function SettingsScreen() {
         <Avatar name={me?.name ?? '?'} size={56} filled />
         <div className="min-w-0 flex-1">
           <div className="truncate text-lg font-black italic">{me?.name ?? '—'}</div>
-          <div className="truncate text-sm text-muted">{me?.handle ?? ''}</div>
+          <div className="truncate text-sm text-muted">{me?.handle ? `@${me.handle}` : ''}</div>
         </div>
-        <button
+        <span
           aria-label="QR"
           className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-ink"
-          onClick={(e) => {
-            e.preventDefault()
-            if (me) window.alert(me.handle)
-          }}
         >
           <IconQR size={16} />
-        </button>
+        </span>
       </Link>
 
       <ul className="mt-4 flex flex-col gap-0 border-y border-line bg-paper">

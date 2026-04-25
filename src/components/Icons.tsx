@@ -211,6 +211,16 @@ export function IconUser({ size = 20, className, stroke = 2 }: IconProps) {
   )
 }
 
+export function IconChannel({ size = 20, className, stroke = 2 }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} stroke="currentColor" strokeWidth={stroke} fill="none" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 11v2a2 2 0 0 0 2 2h2l5 4V5L7 9H5a2 2 0 0 0-2 2z" />
+      <path d="M16 8a5 5 0 0 1 0 8" />
+      <path d="M19 5a9 9 0 0 1 0 14" />
+    </svg>
+  )
+}
+
 export function IconLock({ size = 20, className, stroke = 2 }: IconProps) {
   return (
     <svg {...base(size)} className={className} stroke="currentColor" strokeWidth={stroke} fill="none" strokeLinecap="round" strokeLinejoin="round">

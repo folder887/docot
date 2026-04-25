@@ -4,6 +4,7 @@ import { useApp } from '../store'
 import { t } from '../i18n'
 import { ScreenHeader } from '../components/ScreenHeader'
 import { IconTrash } from '../components/Icons'
+import { ConfirmDialog } from '../components/Modal'
 import type { Note } from '../types'
 
 export function NoteDetailScreen() {
@@ -27,6 +28,7 @@ function NoteEditor({ note }: { note: Note }) {
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState(note.title)
   const [body, setBody] = useState(note.body)
+  const [confirmDel, setConfirmDel] = useState(false)
 
   const backlinks = useMemo(() => {
     const needle = note.title.toLowerCase()
@@ -63,17 +65,26 @@ function NoteEditor({ note }: { note: Note }) {
             <button
               aria-label={t('notes.delete', state.lang)}
               className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-black"
-              onClick={() => {
-                if (window.confirm(`${t('notes.delete', state.lang)}?`)) {
-                  void deleteNote(note.id)
-                  navigate('/notes', { replace: true })
-                }
-              }}
+              onClick={() => setConfirmDel(true)}
             >
               <IconTrash size={14} />
             </button>
           </div>
         }
+      />
+      <ConfirmDialog
+        open={confirmDel}
+        message={t('note.delete.confirm', state.lang)}
+        okLabel={t('common.delete', state.lang)}
+        cancelLabel={t('common.cancel', state.lang)}
+        destructive
+        onResolve={(ok) => {
+          setConfirmDel(false)
+          if (ok) {
+            void deleteNote(note.id)
+            navigate('/notes', { replace: true })
+          }
+        }}
       />
       <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-4">
         {editing ? (

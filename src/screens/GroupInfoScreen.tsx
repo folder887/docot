@@ -85,7 +85,7 @@ export function GroupInfoScreen() {
               <Avatar name={m.name} size={40} filled={m.id !== state.me?.id} />
               <div className="min-w-0 flex-1">
                 <div className="truncate font-bold">{m.name}</div>
-                <div className="truncate text-xs text-muted">{m.handle || ''}</div>
+                <div className="truncate text-xs text-muted">{m.handle ? `@${m.handle}` : ''}</div>
               </div>
               <IconChevron size={16} />
             </Link>

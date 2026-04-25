@@ -3,13 +3,24 @@ import type { ReactNode } from 'react'
 import type {
   ApiChat,
   ApiEvent,
+  ApiFolder,
   ApiMessage,
   ApiNote,
   ApiPost,
   ApiUser,
 } from './api'
 import { api, getToken, setToken } from './api'
-import type { CalendarEvent, Chat, Lang, Message, NewsPost, Note, Prefs, User } from './types'
+import type {
+  CalendarEvent,
+  Chat,
+  ChatFolder,
+  Lang,
+  Message,
+  NewsPost,
+  Note,
+  Prefs,
+  User,
+} from './types'
 import { defaultPrefs } from './types'
 
 const PREFS_KEY = 'docot:prefs'
@@ -27,6 +38,7 @@ export type AppState = {
   events: CalendarEvent[]
   notes: Note[]
   news: NewsPost[]
+  folders: ChatFolder[]
   /** true once user completed signup/login */
   onboarded: boolean
 }
@@ -52,6 +64,10 @@ type Ctx = {
   addPost: (text: string) => Promise<void>
   toggleLike: (id: string) => Promise<void>
   repost: (id: string) => Promise<void>
+  createFolder: (name: string, chatIds?: string[]) => Promise<string>
+  renameFolder: (id: string, name: string) => Promise<void>
+  setFolderChats: (id: string, chatIds: string[]) => Promise<void>
+  deleteFolder: (id: string) => Promise<void>
   updateMe: (patch: { name?: string; bio?: string; phone?: string }) => Promise<void>
   loadUser: (id: string) => Promise<User | null>
   userById: (id: string) => User | null
@@ -142,7 +158,12 @@ function postFromApi(p: ApiPost): NewsPost {
     reposts: p.reposts,
     replies: p.replies,
     liked: p.liked,
+    reposted: p.reposted,
   }
+}
+
+function folderFromApi(f: ApiFolder): ChatFolder {
+  return { id: f.id, name: f.name, sortOrder: f.sortOrder, chatIds: f.chatIds }
 }
 
 function emptyState(lang: Lang, prefs: Prefs, status: Status): AppState {
@@ -156,6 +177,7 @@ function emptyState(lang: Lang, prefs: Prefs, status: Status): AppState {
     events: [],
     notes: [],
     news: [],
+    folders: [],
     onboarded: false,
   }
 }
@@ -188,12 +210,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const hydrate = useCallback(async (me: User) => {
-    const [chats, notes, events, posts, contacts] = await Promise.all([
+    const [chats, notes, events, posts, contacts, folders] = await Promise.all([
       api.listChats(),
       api.listNotes(),
       api.listEvents(),
       api.listPosts(),
       api.listContacts(),
+      api.listFolders().catch(() => [] as ApiFolder[]),
     ])
     // collect unknown participant IDs to fetch their profiles
     const knownIds = new Set<string>([me.id, ...contacts.map((c) => c.id)])
@@ -227,6 +250,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       notes: notes.map(noteFromApi),
       events: events.map(eventFromApi),
       news: posts.map(postFromApi),
+      folders: folders.map(folderFromApi),
     }))
   }, [])
 
@@ -459,6 +483,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }))
   }, [])
 
+  const createFolder = useCallback(async (name: string, chatIds: string[] = []) => {
+    const f = folderFromApi(await api.createFolder({ name, chatIds }))
+    setState((s) => ({ ...s, folders: [...s.folders, f] }))
+    return f.id
+  }, [])
+
+  const renameFolder = useCallback(async (id: string, name: string) => {
+    const f = folderFromApi(await api.updateFolder(id, { name }))
+    setState((s) => ({ ...s, folders: s.folders.map((x) => (x.id === id ? f : x)) }))
+  }, [])
+
+  const setFolderChats = useCallback(async (id: string, chatIds: string[]) => {
+    const f = folderFromApi(await api.updateFolder(id, { chatIds }))
+    setState((s) => ({ ...s, folders: s.folders.map((x) => (x.id === id ? f : x)) }))
+  }, [])
+
+  const deleteFolder = useCallback(async (id: string) => {
+    await api.deleteFolder(id)
+    setState((s) => ({ ...s, folders: s.folders.filter((f) => f.id !== id) }))
+  }, [])
+
   const updateMe = useCallback(
     async (patch: { name?: string; bio?: string; phone?: string }) => {
       const u = userFromApi(await api.updateMe(patch))
@@ -534,6 +579,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addPost,
       toggleLike,
       repost,
+      createFolder,
+      renameFolder,
+      setFolderChats,
+      deleteFolder,
       updateMe,
       loadUser,
       userById,
@@ -563,6 +612,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addPost,
       toggleLike,
       repost,
+      createFolder,
+      renameFolder,
+      setFolderChats,
+      deleteFolder,
       updateMe,
       loadUser,
       userById,

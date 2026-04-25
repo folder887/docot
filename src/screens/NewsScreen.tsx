@@ -50,7 +50,7 @@ export function NewsScreen() {
         {state.news.map((p) => {
           const a = userById(p.authorId)
           const displayName = a?.name ?? p.authorId
-          const displayHandle = a?.handle ?? ''
+          const displayHandle = a?.handle ? `@${a.handle}` : ''
           return (
             <li key={p.id} className="border-b border-line p-4 fade-in">
               <div className="flex gap-3">
@@ -72,7 +72,12 @@ export function NewsScreen() {
                   <p className="mt-1 whitespace-pre-wrap break-words text-[15px] leading-relaxed">{p.text}</p>
                   <div className="mt-3 flex items-center justify-between pr-4 text-muted">
                     <ActionBtn icon={<IconReply size={18} />} count={p.replies} onClick={() => {}} />
-                    <ActionBtn icon={<IconRepeat size={18} />} count={p.reposts} onClick={() => void repost(p.id)} />
+                    <ActionBtn
+                      icon={<IconRepeat size={18} />}
+                      count={p.reposts}
+                      onClick={() => void repost(p.id)}
+                      active={p.reposted}
+                    />
                     <ActionBtn
                       icon={<IconHeart size={18} filled={p.liked} />}
                       count={p.likes}
