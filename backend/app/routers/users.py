@@ -36,11 +36,20 @@ def search(
     qn = q.strip().lstrip("@").lower()
     if len(qn) < 1:
         return []
+    # Escape SQL LIKE wildcards in user input so `%` / `_` don't broaden the match.
+    def _esc(s: str) -> str:
+        return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+    handle_pat = f"%{_esc(qn)}%"
+    name_pat = f"%{_esc(q.strip())}%"
     rows = (
         db.query(User)
         .filter(
             User.id != me.id,
-            or_(User.handle.like(f"%{qn}%"), User.name.ilike(f"%{q.strip()}%")),
+            or_(
+                User.handle.like(handle_pat, escape="\\"),
+                User.name.ilike(name_pat, escape="\\"),
+            ),
         )
         .order_by(User.handle)
         .limit(20)
@@ -108,10 +117,13 @@ def add_contact(
     )
     if existing:
         existing.blocked = False
+        contact = existing
     else:
-        db.add(Contact(owner_id=me.id, contact_id=target.id))
+        contact = Contact(owner_id=me.id, contact_id=target.id)
+        db.add(contact)
     db.commit()
-    return _out(target, {target.id: existing} if existing else None)
+    db.refresh(contact)
+    return _out(target, {target.id: contact})
 
 
 @router.delete("/{user_id}/contact", response_model=UserOut)
