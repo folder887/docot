@@ -20,6 +20,8 @@ import { ProfileScreen } from './screens/ProfileScreen'
 import { GroupInfoScreen } from './screens/GroupInfoScreen'
 import { TabBar, DesktopSidebar } from './components/TabBar'
 import { TopBar } from './components/TopBar'
+import { ToastHost } from './components/Toast'
+import { PasscodeLockGate } from './components/PasscodeLockGate'
 
 const TOP_TAB_ROUTES = ['/chats', '/calendar', '/notes', '/news', '/menu']
 
@@ -106,7 +108,10 @@ export default function App() {
   return (
     <AppProvider>
       <ThemeSync />
-      <Guarded />
+      <PasscodeLockGate>
+        <Guarded />
+      </PasscodeLockGate>
+      <ToastHost />
     </AppProvider>
   )
 }

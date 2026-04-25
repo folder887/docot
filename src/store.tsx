@@ -61,8 +61,11 @@ type Ctx = {
   state: AppState
   setLang: (l: Lang) => void
   setPrefs: (patch: Partial<Prefs>) => void
+  setPasscode: (pin: string) => void
+  clearPasscode: () => void
   signup: (handle: string, name: string, password: string) => Promise<void>
   login: (handle: string, password: string) => Promise<void>
+  loginByPair: (pairToken: string) => Promise<void>
   logout: () => void
   sendMessage: (chatId: string, text: string, replyToId?: string | null) => Promise<void>
   editMessage: (chatId: string, messageId: string, text: string) => Promise<void>
@@ -440,6 +443,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setState((s) => ({ ...s, prefs: { ...s.prefs, ...patch } }))
   }, [])
 
+  const setPasscode = useCallback((pin: string) => {
+    const salt = crypto.getRandomValues(new Uint8Array(16))
+    const saltHex = Array.from(salt).map((b) => b.toString(16).padStart(2, '0')).join('')
+    const data = new TextEncoder().encode(saltHex + ':' + pin)
+    void crypto.subtle.digest('SHA-256', data).then((buf) => {
+      const hex = Array.from(new Uint8Array(buf))
+        .map((b) => b.toString(16).padStart(2, '0'))
+        .join('')
+      try {
+        localStorage.setItem('docot.passcode.hash', hex)
+        localStorage.setItem('docot.passcode.salt', saltHex)
+        sessionStorage.setItem('docot.passcode.unlocked', '1')
+      } catch {
+        /* ignore */
+      }
+      setState((s) => ({ ...s, prefs: { ...s.prefs, passcode: true } }))
+    })
+  }, [])
+
+  const clearPasscode = useCallback(() => {
+    try {
+      localStorage.removeItem('docot.passcode.hash')
+      localStorage.removeItem('docot.passcode.salt')
+      sessionStorage.removeItem('docot.passcode.unlocked')
+    } catch {
+      /* ignore */
+    }
+    setState((s) => ({ ...s, prefs: { ...s.prefs, passcode: false } }))
+  }, [])
+
   const signup = useCallback(
     async (handle: string, name: string, password: string) => {
       const { token, user } = await api.signup(handle, name, password)
@@ -453,6 +486,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const login = useCallback(
     async (handle: string, password: string) => {
       const { token, user } = await api.login(handle, password)
+      setToken(token)
+      await hydrate(userFromApi(user))
+      ensureIdentity().catch((err) => console.warn('e2e bootstrap', err))
+    },
+    [hydrate],
+  )
+
+  const loginByPair = useCallback(
+    async (pairToken: string) => {
+      const { token, user } = await api.pairClaim(pairToken)
       setToken(token)
       await hydrate(userFromApi(user))
       ensureIdentity().catch((err) => console.warn('e2e bootstrap', err))
@@ -970,8 +1013,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       state,
       setLang,
       setPrefs,
+      setPasscode,
+      clearPasscode,
       signup,
       login,
+      loginByPair,
       logout,
       sendMessage,
       editMessage,
@@ -1010,8 +1056,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       state,
       setLang,
       setPrefs,
+      setPasscode,
+      clearPasscode,
       signup,
       login,
+      loginByPair,
       logout,
       sendMessage,
       editMessage,

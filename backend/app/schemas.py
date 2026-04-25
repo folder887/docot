@@ -305,4 +305,13 @@ class DeviceListOut(BaseModel):
     devices: list[DeviceOut] = []
 
 
+class PairStartOut(BaseModel):
+    token: str
+    expires: int
+
+
+class PairClaimIn(BaseModel):
+    token: str = Field(min_length=8, max_length=64)
+
+
 AuthOut.model_rebuild()

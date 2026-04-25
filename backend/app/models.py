@@ -229,6 +229,22 @@ class UserKeys(Base):
     updated_at: Mapped[int] = mapped_column(Integer, default=now_ms)
 
 
+class PairToken(Base):
+    """Short-lived QR pairing token. The logged-in device generates one and
+    a new device claims it to receive a fresh session token for the same user.
+    """
+
+    __tablename__ = "pair_tokens"
+
+    token: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    created_at: Mapped[int] = mapped_column(Integer, default=now_ms)
+    expires_at: Mapped[int] = mapped_column(Integer)
+    consumed_at: Mapped[int] = mapped_column(Integer, default=0)
+
+
 class OneTimePreKey(Base):
     """Pool of one-time prekeys; consumed atomically when a peer fetches a bundle.
 

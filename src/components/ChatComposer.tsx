@@ -15,6 +15,7 @@ import { api } from '../api'
 import { encodeMedia, type MediaDescriptor } from '../messageMedia'
 import { t } from '../i18n'
 import { useApp } from '../store'
+import { showToast } from './Toast'
 
 type Props = {
   onSend: (text: string) => void
@@ -119,7 +120,7 @@ export function ChatComposer({
   async function startRecording() {
     if (recState !== 'idle') return
     if (!navigator.mediaDevices?.getUserMedia || typeof window.MediaRecorder === 'undefined') {
-      window.alert(t('chat.voiceUnsupported', state.lang))
+      showToast(t('chat.voiceUnsupported', state.lang), 'error')
       return
     }
     try {
@@ -191,7 +192,7 @@ export function ChatComposer({
     if (!file) return
     e.target.value = ''
     if (file.size > 25 * 1024 * 1024) {
-      window.alert(t('chat.fileTooLarge', state.lang))
+      showToast(t('chat.fileTooLarge', state.lang), 'error')
       return
     }
     setUploading(true)

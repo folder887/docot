@@ -12,7 +12,6 @@ import {
   IconPalette,
   IconQR,
   IconSliders,
-  IconSpeaker,
   IconUser,
 } from '../components/Icons'
 
@@ -29,7 +28,8 @@ const SECTIONS: Row[] = [
   { to: '/settings/chat', labelKey: 'settings.chatSettings', icon: <IconPalette size={20} /> },
   { to: '/settings/folders', labelKey: 'settings.folders', icon: <IconFolder size={20} /> },
   { to: '/settings/advanced', labelKey: 'settings.advanced', icon: <IconSliders size={20} /> },
-  { to: '/settings/speakers', labelKey: 'settings.speakers', icon: <IconSpeaker size={20} /> },
+  { to: '/settings/storage', labelKey: 'settings.storage', icon: <IconFolder size={20} /> },
+  { to: '/settings/devices', labelKey: 'settings.devices', icon: <IconLock size={20} /> },
   { to: '/settings/battery', labelKey: 'settings.battery', icon: <IconBattery size={20} /> },
 ]
 

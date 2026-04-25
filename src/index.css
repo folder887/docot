@@ -4,6 +4,15 @@
 @tailwind components;
 @tailwind utilities;
 
+::selection {
+  background: var(--ink);
+  color: var(--paper);
+}
+::-moz-selection {
+  background: var(--ink);
+  color: var(--paper);
+}
+
 :root {
   --ink: #000;
   --paper: #fff;

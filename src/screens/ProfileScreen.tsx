@@ -19,7 +19,7 @@ import {
 
 export function ProfileScreen() {
   const { id } = useParams<{ id: string }>()
-  const { state, userById, loadUser, createChat, setPrefs } = useApp()
+  const { state, userById, loadUser, createChat, muteChat } = useApp()
   const navigate = useNavigate()
 
   const me = state.me
@@ -145,9 +145,13 @@ export function ProfileScreen() {
         <div className="mx-4 grid grid-cols-3 gap-2">
           <ActionButton onClick={openDm} icon={<IconChat size={20} stroke={2} />} label={t('profile.message', state.lang)} />
           <ActionButton
-            onClick={() => setPrefs({ muteAll: !state.prefs.muteAll })}
-            icon={<IconBell size={20} muted={state.prefs.muteAll} />}
-            label={state.prefs.muteAll ? t('profile.unmute', state.lang) : t('profile.mute', state.lang)}
+            disabled={!dm}
+            onClick={() => {
+              if (!dm) return
+              void muteChat(dm.id, !dm.muted)
+            }}
+            icon={<IconBell size={20} muted={!!dm?.muted} />}
+            label={dm?.muted ? t('profile.unmute', state.lang) : t('profile.mute', state.lang)}
           />
           <ActionButton
             onClick={() => setShowCall(true)}
@@ -324,15 +328,18 @@ function ActionButton({
   icon,
   label,
   onClick,
+  disabled,
 }: {
   icon: React.ReactNode
   label: string
   onClick?: () => void
+  disabled?: boolean
 }) {
   return (
     <button
       onClick={onClick}
-      className="ripple row-press flex flex-col items-center justify-center gap-1 rounded-2xl border-2 border-ink bg-paper px-2 py-3 text-ink"
+      disabled={disabled}
+      className="ripple row-press flex flex-col items-center justify-center gap-1 rounded-2xl border-2 border-ink bg-paper px-2 py-3 text-ink disabled:opacity-50"
     >
       {icon}
       <span className="text-[11px] font-bold uppercase tracking-wide">{label}</span>

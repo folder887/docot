@@ -176,6 +176,15 @@ export const api = {
   updateMe: (patch: { name?: string; bio?: string; phone?: string }) =>
     request<ApiUser>('/users/me', { method: 'PATCH', body: JSON.stringify(patch) }),
 
+  // QR pairing — logged-in device generates a token, new device claims it.
+  pairStart: () =>
+    request<{ token: string; expires: number }>('/auth/pair/start', { method: 'POST' }),
+  pairClaim: (token: string) =>
+    request<{ token: string; user: ApiUser }>('/auth/pair/claim', {
+      method: 'POST',
+      body: JSON.stringify({ token }),
+    }),
+
   // users
   searchUsers: (q: string) =>
     request<ApiUser[]>(`/users/search?q=${encodeURIComponent(q)}`),

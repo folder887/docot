@@ -1,10 +1,31 @@
-import { Link } from 'react-router-dom'
+import { useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import { Logo } from '../components/Logo'
 import { useApp } from '../store'
 import { t } from '../i18n'
+import { Modal } from '../components/Modal'
+import { QRScanner } from '../components/QRScanner'
+import { showToast } from '../components/Toast'
 
 export function WelcomeScreen() {
-  const { state, setLang } = useApp()
+  const { state, setLang, loginByPair } = useApp()
+  const navigate = useNavigate()
+  const [scanOpen, setScanOpen] = useState(false)
+
+  const onQrResult = async (raw: string) => {
+    setScanOpen(false)
+    let token = raw.trim()
+    const m = token.match(/token=([^&\s]+)/)
+    if (m) token = decodeURIComponent(m[1])
+    try {
+      await loginByPair(token)
+      showToast(state.lang === 'ru' ? 'Вход выполнен' : 'Signed in')
+      navigate('/chats')
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      showToast(msg, 'error')
+    }
+  }
   return (
     <div className="flex h-full min-h-[100svh] w-full flex-col bg-paper text-ink">
       {/* Top: language switcher under a thick separator line */}
@@ -40,7 +61,22 @@ export function WelcomeScreen() {
         <Link to="/login" className="bw-btn-ghost text-lg">
           {t('welcome.haveAcc', state.lang)}
         </Link>
+        <button
+          type="button"
+          onClick={() => setScanOpen(true)}
+          className="text-sm font-bold underline-offset-2 hover:underline"
+        >
+          {state.lang === 'ru' ? 'Войти по QR с другого устройства' : 'Sign in with QR from another device'}
+        </button>
       </div>
+
+      <Modal
+        open={scanOpen}
+        onClose={() => setScanOpen(false)}
+        title={state.lang === 'ru' ? 'Сканируйте QR' : 'Scan QR code'}
+      >
+        <QRScanner onResult={onQrResult} onClose={() => setScanOpen(false)} />
+      </Modal>
     </div>
   )
 }
