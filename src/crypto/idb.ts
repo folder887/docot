@@ -7,7 +7,7 @@
  */
 
 const DB_NAME = 'docot-e2e'
-const DB_VERSION = 2
+const DB_VERSION = 3
 
 export const STORES = {
   meta: 'meta',
@@ -18,6 +18,9 @@ export const STORES = {
   /** plaintext of messages we sent ourselves; we cannot decrypt our own
    * outgoing ciphertext, so we keep a local copy keyed by message id. */
   outgoing: 'outgoing',
+  /** plaintext of incoming messages we have already decrypted. Signal ratchet
+   * advances on each decrypt, so we cannot decrypt a second time. */
+  incoming: 'incoming',
 } as const
 
 export type StoreName = (typeof STORES)[keyof typeof STORES]

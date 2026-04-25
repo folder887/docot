@@ -25,7 +25,12 @@ import { defaultPrefs } from './types'
 import { ensureIdentity } from './crypto/identity'
 import { encryptForUser, isEncryptedEnvelope, maybeDecrypt } from './crypto/session'
 import { idbClearAll } from './crypto/idb'
-import { recallOutgoing, rememberOutgoing } from './crypto/outgoing'
+import {
+  recallIncoming,
+  recallOutgoing,
+  rememberIncoming,
+  rememberOutgoing,
+} from './crypto/outgoing'
 
 const PREFS_KEY = 'docot:prefs'
 const LANG_KEY = 'docot:lang'
@@ -153,7 +158,19 @@ async function decryptHistory(
         changed = true
         continue
       }
+      // Incoming: prefer the cached plaintext from the first decrypt; the
+      // Signal ratchet has advanced past this message and a second attempt
+      // would fail.
+      const cachedIn = await recallIncoming(m.id)
+      if (cachedIn !== undefined) {
+        next.push({ ...m, text: cachedIn })
+        changed = true
+        continue
+      }
       const plain = await maybeDecrypt(peerId, m.text)
+      if (plain) {
+        rememberIncoming(m.id, plain).catch(() => {})
+      }
       next.push({ ...m, text: plain })
       changed = true
     }
@@ -514,7 +531,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     async (chatId: string, msg: Message) => {
       let final = msg
       if (isEncryptedEnvelope(msg.text) && state.me && msg.authorId !== state.me.id) {
-        const plain = await maybeDecrypt(msg.authorId, msg.text)
+        const cached = await recallIncoming(msg.id)
+        const plain = cached !== undefined ? cached : await maybeDecrypt(msg.authorId, msg.text)
+        if (cached === undefined && plain) {
+          rememberIncoming(msg.id, plain).catch(() => {})
+        }
         final = { ...msg, text: plain }
       }
       setState((s) => ({

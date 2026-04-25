@@ -120,19 +120,24 @@ def fetch_bundle(
 
 def _add_one_time_keys(user_id: str, keys: list[PreKeyOut], db: Session) -> None:
     for k in keys:
-        db.add(
-            OneTimePreKey(
-                user_id=user_id,
-                key_id=k.keyId,
-                public_key=k.publicKey,
-                consumed=False,
-            )
-        )
+        # Wrap each insert in a SAVEPOINT so a duplicate key only rolls back
+        # this single row — without touching the surrounding transaction
+        # (UserKeys row + previously-flushed OTPs).
+        sp = db.begin_nested()
         try:
+            db.add(
+                OneTimePreKey(
+                    user_id=user_id,
+                    key_id=k.keyId,
+                    public_key=k.publicKey,
+                    consumed=False,
+                )
+            )
             db.flush()
+            sp.commit()
         except IntegrityError:
-            db.rollback()
-            # Skip duplicates (same keyId already uploaded).
+            sp.rollback()
+            # Duplicate (user_id, key_id) — skip and keep going.
 
 
 def _status(user_id: str, db: Session) -> KeyStatusOut:
