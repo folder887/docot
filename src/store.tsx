@@ -62,7 +62,7 @@ type Ctx = {
   sendMessage: (chatId: string, text: string, replyToId?: string | null) => Promise<void>
   editMessage: (chatId: string, messageId: string, text: string) => Promise<void>
   deleteMessage: (chatId: string, messageId: string) => Promise<void>
-  applyMessageEdit: (chatId: string, msg: Message) => void
+  applyMessageEdit: (chatId: string, msg: Message) => Promise<void>
   applyMessageDelete: (chatId: string, messageId: string, deletedAt: number) => void
   createChat: (participantIds: string[], kind?: Chat['kind'], title?: string) => Promise<string>
   patchChat: (chatId: string, patch: { title?: string; description?: string; isPublic?: boolean }) => Promise<void>
@@ -462,20 +462,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [state.chats, state.me],
   )
 
-  const applyMessageEdit = useCallback((chatId: string, msg: Message) => {
+  const applyMessageEdit = useCallback(async (chatId: string, msg: Message) => {
+    let final = msg
+    const chat = chatsRef.current.find((c) => c.id === chatId)
+    if (chat?.kind === 'dm' && isEncryptedEnvelope(msg.text) && state.me) {
+      if (msg.authorId === state.me.id) {
+        const cached = await recallOutgoing(msg.id)
+        final = { ...msg, text: cached ?? '' }
+      } else {
+        const cachedIn = await recallIncoming(msg.id)
+        const plain =
+          cachedIn !== undefined ? cachedIn : await maybeDecrypt(msg.authorId, msg.text)
+        if (cachedIn === undefined && plain) {
+          rememberIncoming(msg.id, plain).catch(() => {})
+        }
+        final = { ...msg, text: plain }
+      }
+    }
     setState((s) => ({
       ...s,
       chats: s.chats.map((c) =>
         c.id === chatId
           ? {
               ...c,
-              messages: c.messages.map((m) => (m.id === msg.id ? msg : m)),
-              lastMessage: c.lastMessage?.id === msg.id ? msg : c.lastMessage,
+              messages: c.messages.map((m) => (m.id === final.id ? final : m)),
+              lastMessage: c.lastMessage?.id === final.id ? final : c.lastMessage,
             }
           : c,
       ),
     }))
-  }, [])
+  }, [state.me])
 
   const applyMessageDelete = useCallback(
     (chatId: string, messageId: string, deletedAt: number) => {
@@ -498,10 +514,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const editMessage = useCallback(
     async (chatId: string, messageId: string, text: string) => {
-      const msg = msgFromApi(await api.editMessage(chatId, messageId, text))
-      applyMessageEdit(chatId, msg)
+      const trimmed = text.trim()
+      if (!trimmed) return
+      const chat = chatsRef.current.find((c) => c.id === chatId)
+      const peerId = chat && chat.kind === 'dm' && state.me
+        ? chat.participants.find((p) => p !== state.me?.id) ?? null
+        : null
+      let payload = trimmed
+      if (peerId) {
+        try {
+          payload = await encryptForUser(peerId, trimmed)
+        } catch (err) {
+          console.warn('encrypt edit failed, sending plaintext', err)
+        }
+      }
+      const apiMsg = await api.editMessage(chatId, messageId, payload)
+      const msg: Message = { ...msgFromApi(apiMsg), text: trimmed }
+      if (peerId) {
+        rememberOutgoing(msg.id, trimmed).catch(() => {})
+      }
+      await applyMessageEdit(chatId, msg)
     },
-    [applyMessageEdit],
+    [applyMessageEdit, state.me],
   )
 
   const deleteMessage = useCallback(

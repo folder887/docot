@@ -93,7 +93,8 @@ export function ChatDetailScreen() {
             queue = queue.then(() => addIncomingMessage(chat.id, incoming))
           }
         } else if (data.type === 'message_edited' && data.message) {
-          applyMessageEdit(chat.id, data.message)
+          const edited = data.message
+          queue = queue.then(() => applyMessageEdit(chat.id, edited))
         } else if (data.type === 'message_deleted' && data.messageId) {
           applyMessageDelete(chat.id, data.messageId, data.deletedAt ?? Date.now())
         }

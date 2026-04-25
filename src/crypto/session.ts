@@ -55,6 +55,26 @@ function addressFor(userId: string): SignalProtocolAddress {
   return new SignalProtocolAddress(userId, DEVICE_ID)
 }
 
+/**
+ * Per-peer serialization. Signal's Double Ratchet mutates session state on
+ * every encrypt and decrypt; concurrent operations against the same address
+ * race on read-modify-write of the IDB session blob and corrupt the ratchet.
+ *
+ * We chain every session-touching call through a per-userId promise so they
+ * run strictly in order while still allowing different peers to proceed in
+ * parallel.
+ */
+const sessionLocks = new Map<string, Promise<unknown>>()
+function withSessionLock<T>(userId: string, fn: () => Promise<T>): Promise<T> {
+  const prev = sessionLocks.get(userId) ?? Promise.resolve()
+  const next = prev.then(fn, fn)
+  sessionLocks.set(
+    userId,
+    next.catch(() => undefined),
+  )
+  return next
+}
+
 async function ensureSession(userId: string): Promise<void> {
   const address = addressFor(userId)
   const existing = await signalStore.loadSession(address.toString())
@@ -76,7 +96,11 @@ async function ensureSession(userId: string): Promise<void> {
   })
 }
 
-export async function encryptForUser(userId: string, plaintext: string): Promise<string> {
+export function encryptForUser(userId: string, plaintext: string): Promise<string> {
+  return withSessionLock(userId, () => _encryptForUser(userId, plaintext))
+}
+
+async function _encryptForUser(userId: string, plaintext: string): Promise<string> {
   await ensureSession(userId)
   const cipher = new SessionCipher(signalStore, addressFor(userId))
   const ct = await cipher.encrypt(utf82ab(plaintext))
@@ -103,7 +127,11 @@ export async function encryptForUser(userId: string, plaintext: string): Promise
   })
 }
 
-export async function decryptFromUser(userId: string, text: string): Promise<string> {
+export function decryptFromUser(userId: string, text: string): Promise<string> {
+  return withSessionLock(userId, () => _decryptFromUser(userId, text))
+}
+
+async function _decryptFromUser(userId: string, text: string): Promise<string> {
   const env = decodeEnvelope(text)
   if (!env) throw new Error('not_encrypted')
   const cipher = new SessionCipher(signalStore, addressFor(userId))
