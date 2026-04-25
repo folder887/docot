@@ -55,18 +55,66 @@ export type ApiUser = {
   blocked: boolean
 }
 
-export type ApiMessage = { id: string; authorId: string; text: string; at: number }
+export type ApiMessage = {
+  id: string
+  authorId: string
+  text: string
+  at: number
+  editedAt?: number | null
+  deletedAt?: number | null
+  replyToId?: string | null
+}
 
 export type ApiChat = {
   id: string
   kind: 'dm' | 'group' | 'channel' | 'saved'
   title: string
+  description?: string
+  isPublic?: boolean
+  createdBy?: string
   participants: string[]
   pinned: boolean
   muted: boolean
+  role?: 'owner' | 'admin' | 'member'
   updatedAt: number
   lastMessage: ApiMessage | null
   messages: ApiMessage[]
+}
+
+export type ApiChatMember = {
+  userId: string
+  role: 'owner' | 'admin' | 'member'
+  joinedAt: number
+}
+
+export type ApiInvite = {
+  token: string
+  chatId: string
+  createdBy: string
+  createdAt: number
+  expiresAt: number | null
+  maxUses: number | null
+  uses: number
+  revoked: boolean
+  url: string
+}
+
+export type ApiInviteInfo = {
+  token: string
+  chatId: string
+  title: string
+  kind: 'dm' | 'group' | 'channel'
+  description: string
+  memberCount: number
+  valid: boolean
+}
+
+export type ApiPostMedia = {
+  url: string
+  kind: 'image' | 'video' | 'audio' | 'file'
+  name: string
+  mime: string
+  size: number
 }
 
 export type ApiNote = {
@@ -97,6 +145,7 @@ export type ApiPost = {
   replies: number
   liked: boolean
   reposted: boolean
+  media?: ApiPostMedia[]
 }
 
 export type ApiFolder = {
@@ -141,13 +190,60 @@ export const api = {
   // chats
   listChats: () => request<ApiChat[]>('/chats'),
   getChat: (id: string) => request<ApiChat>(`/chats/${encodeURIComponent(id)}`),
-  createChat: (body: { kind: 'dm' | 'group' | 'channel'; title?: string; participantIds: string[] }) =>
-    request<ApiChat>('/chats', { method: 'POST', body: JSON.stringify(body) }),
-  sendMessage: (chatId: string, text: string) =>
+  createChat: (body: {
+    kind: 'dm' | 'group' | 'channel'
+    title?: string
+    description?: string
+    isPublic?: boolean
+    participantIds: string[]
+  }) => request<ApiChat>('/chats', { method: 'POST', body: JSON.stringify(body) }),
+  patchChat: (chatId: string, patch: { title?: string; description?: string; isPublic?: boolean }) =>
+    request<ApiChat>(`/chats/${encodeURIComponent(chatId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+  sendMessage: (chatId: string, body: { text: string; replyToId?: string | null }) =>
     request<ApiMessage>(`/chats/${encodeURIComponent(chatId)}/messages`, {
       method: 'POST',
-      body: JSON.stringify({ text }),
+      body: JSON.stringify(body),
     }),
+  editMessage: (chatId: string, messageId: string, text: string) =>
+    request<ApiMessage>(
+      `/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(messageId)}`,
+      { method: 'PATCH', body: JSON.stringify({ text }) },
+    ),
+  deleteMessage: (chatId: string, messageId: string) =>
+    request<{ ok: boolean; id: string }>(
+      `/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(messageId)}`,
+      { method: 'DELETE' },
+    ),
+  listChatMembers: (chatId: string) =>
+    request<ApiChatMember[]>(`/chats/${encodeURIComponent(chatId)}/members`),
+  patchChatMember: (chatId: string, userId: string, role: 'owner' | 'admin' | 'member') =>
+    request<ApiChatMember>(
+      `/chats/${encodeURIComponent(chatId)}/members/${encodeURIComponent(userId)}`,
+      { method: 'PATCH', body: JSON.stringify({ role }) },
+    ),
+  removeChatMember: (chatId: string, userId: string) =>
+    request<{ ok: boolean }>(
+      `/chats/${encodeURIComponent(chatId)}/members/${encodeURIComponent(userId)}`,
+      { method: 'DELETE' },
+    ),
+
+  // invites
+  listInvites: (chatId: string) =>
+    request<ApiInvite[]>(`/chats/${encodeURIComponent(chatId)}/invites`),
+  createInvite: (chatId: string, body?: { expiresAt?: number; maxUses?: number }) =>
+    request<ApiInvite>(`/chats/${encodeURIComponent(chatId)}/invites`, {
+      method: 'POST',
+      body: JSON.stringify(body ?? {}),
+    }),
+  revokeInvite: (token: string) =>
+    request<{ ok: boolean }>(`/invites/${encodeURIComponent(token)}`, { method: 'DELETE' }),
+  getInviteInfo: (token: string) =>
+    request<ApiInviteInfo>(`/invites/${encodeURIComponent(token)}`),
+  joinViaInvite: (token: string) =>
+    request<ApiChat>(`/invites/${encodeURIComponent(token)}/join`, { method: 'POST' }),
   pinChat: (chatId: string, pinned: boolean) =>
     request<{ ok: boolean }>(
       `/chats/${encodeURIComponent(chatId)}/pin?pinned=${pinned ? 'true' : 'false'}`,
@@ -193,8 +289,12 @@ export const api = {
 
   // posts
   listPosts: () => request<ApiPost[]>('/posts'),
-  createPost: (text: string) =>
-    request<ApiPost>('/posts', { method: 'POST', body: JSON.stringify({ text }) }),
+  listMyPosts: () => request<ApiPost[]>('/posts/mine'),
+  listMyReposts: () => request<ApiPost[]>('/posts/reposted'),
+  createPost: (body: { text: string; media?: ApiPostMedia[] }) =>
+    request<ApiPost>('/posts', { method: 'POST', body: JSON.stringify(body) }),
+  deletePost: (id: string) =>
+    request<{ ok: boolean }>(`/posts/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   likePost: (id: string) => request<ApiPost>(`/posts/${encodeURIComponent(id)}/like`, { method: 'POST' }),
   repostPost: (id: string) => request<ApiPost>(`/posts/${encodeURIComponent(id)}/repost`, { method: 'POST' }),
 

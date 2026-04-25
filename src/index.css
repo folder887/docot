@@ -230,9 +230,10 @@ select {
     min-height: 0;
     overflow-y: auto;
   }
-  /* Hide bottom tab bar on desktop */
-  .app-shell > nav.tabbar-bottom {
-    display: none;
+  /* Hide bottom tab bar and mobile top bar on desktop */
+  .app-shell > nav.tabbar-bottom,
+  .app-shell > .topbar-mobile {
+    display: none !important;
   }
 }
 
@@ -240,6 +241,52 @@ select {
 @media (max-width: 1023px) {
   .desktop-sidebar {
     display: none !important;
+  }
+}
+
+/* Chats two-pane layout */
+.chats-layout {
+  position: relative;
+}
+.chats-list-pane {
+  width: 100%;
+  flex-shrink: 0;
+  display: flex;
+}
+.chats-detail-pane {
+  display: none;
+}
+.chats-layout[data-detail='true'] .chats-list-pane {
+  display: none;
+}
+.chats-layout[data-detail='true'] .chats-detail-pane {
+  display: flex;
+}
+
+@media (min-width: 1024px) {
+  .chats-list-pane {
+    width: 360px;
+    min-width: 360px;
+    border-right: 2px solid var(--ink);
+    overflow-y: auto;
+    overflow-x: hidden;
+    height: 100%;
+  }
+  .chats-list-pane > div {
+    flex: 1;
+    min-height: 0;
+  }
+  .chats-detail-pane,
+  .chats-layout[data-detail='true'] .chats-list-pane {
+    display: flex;
+  }
+  .chats-layout {
+    flex: 1;
+    min-height: 0;
+  }
+  /* Chats screen header is sticky for the pane scroll, anchor to 0 on desktop */
+  .chats-list-pane .chats-pane-header {
+    top: 0 !important;
   }
 }
 

@@ -96,7 +96,7 @@ export function ChatsScreen() {
 
   return (
     <div className="relative flex flex-col bg-paper text-ink">
-      <div className="sticky top-[57px] z-[5] border-b-2 border-ink bg-paper">
+      <div className="chats-pane-header sticky top-[57px] z-[5] border-b-2 border-ink bg-paper">
         <div className="flex items-center gap-2 px-3 pt-3">
           <input
             value={query}

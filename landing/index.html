@@ -72,13 +72,16 @@
         width: 36px;
         height: 36px;
         border-radius: 50%;
-        background: var(--ink);
-        color: var(--paper);
+        background: var(--paper);
+        color: var(--ink);
         display: grid;
         place-items: center;
-        font-style: italic;
-        font-weight: 900;
-        font-size: 22px;
+        border: 2px solid var(--ink);
+      }
+      .brand-mark svg {
+        width: 70%;
+        height: 70%;
+        display: block;
       }
       .nav-cta {
         display: inline-flex;
@@ -249,7 +252,13 @@
     <header>
       <div class="container nav">
         <a class="brand" href="#">
-          <span class="brand-mark">d</span>
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 2000 2000" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="1354" cy="892" r="259" fill="currentColor" />
+              <circle cx="647" cy="892" r="259" fill="currentColor" />
+              <path d="M1438.03 987L1595 987C1595 987 1518.28 1157.04 1438.03 1241.06C1274.72 1412.04 804.185 1648.08 743.306 1419.23C721.787 1338.34 1846.56 1174.25 764.811 1282.69C650.682 1294.13 1068.62 1198.49 1172.97 1150.7C1283.54 1100.06 1438.03 987 1438.03 987Z" fill="currentColor" />
+            </svg>
+          </span>
           <span>docot</span>
         </a>
         <a class="nav-cta" href="https://dist-thdbbhmb.devinapps.com" target="_blank" rel="noopener">

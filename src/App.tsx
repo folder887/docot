@@ -5,8 +5,10 @@ import { SplashScreen } from './screens/SplashScreen'
 import { WelcomeScreen } from './screens/WelcomeScreen'
 import { SignupScreen } from './screens/SignupScreen'
 import { LoginScreen } from './screens/LoginScreen'
-import { ChatsScreen } from './screens/ChatsScreen'
+import { ChatsLayout } from './screens/ChatsLayout'
 import { ChatDetailScreen } from './screens/ChatDetailScreen'
+import { InviteScreen } from './screens/InviteScreen'
+import { UserHandleRedirect } from './screens/UserHandleRedirect'
 import { CalendarScreen } from './screens/CalendarScreen'
 import { NotesScreen } from './screens/NotesScreen'
 import { NoteDetailScreen } from './screens/NoteDetailScreen'
@@ -60,14 +62,17 @@ function Shell() {
             <Route path="/signup" element={<SignupScreen />} />
             <Route path="/login" element={<LoginScreen />} />
             <Route path="/menu" element={<MenuScreen />} />
-            <Route path="/chats" element={<ChatsScreen />} />
-            <Route path="/chats/:id" element={<ChatDetailScreen />} />
+            <Route path="/chats" element={<ChatsLayout />}>
+              <Route path=":id" element={<ChatDetailScreen />} />
+            </Route>
             <Route path="/calendar" element={<CalendarScreen />} />
             <Route path="/notes" element={<NotesScreen />} />
             <Route path="/notes/:id" element={<NoteDetailScreen />} />
             <Route path="/news" element={<NewsScreen />} />
             <Route path="/profile/:id" element={<ProfileScreen />} />
+            <Route path="/u/:handle" element={<UserHandleRedirect />} />
             <Route path="/group/:id" element={<GroupInfoScreen />} />
+            <Route path="/invite/:token" element={<InviteScreen />} />
             <Route path="/settings" element={<SettingsScreen />} />
             <Route path="/settings/:section" element={<SettingsSubScreen />} />
             <Route path="*" element={<Navigate to="/" replace />} />
@@ -83,12 +88,13 @@ function Guarded() {
   const { state } = useApp()
   const { pathname } = useLocation()
   const publicRoutes = ['/', '/welcome', '/signup', '/login']
+  const isInvitePath = pathname.startsWith('/invite/')
 
   if (state.status === 'loading') {
     return <Shell />
   }
-  if (state.status !== 'authed' && !publicRoutes.includes(pathname)) {
-    return <Navigate to="/welcome" replace />
+  if (state.status !== 'authed' && !publicRoutes.includes(pathname) && !isInvitePath) {
+    return <Navigate to={`/welcome?next=${encodeURIComponent(pathname)}`} replace />
   }
   if (state.status === 'authed' && publicRoutes.includes(pathname) && pathname !== '/') {
     return <Navigate to="/chats" replace />

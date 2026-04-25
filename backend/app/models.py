@@ -44,6 +44,8 @@ class Chat(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: gen_id("c_"))
     kind: Mapped[str] = mapped_column(String(16), default="dm")
     title: Mapped[str] = mapped_column(String(120), default="")
+    description: Mapped[str] = mapped_column(Text, default="")
+    is_public: Mapped[bool] = mapped_column(Boolean, default=False)
     created_by: Mapped[str] = mapped_column(String, ForeignKey("users.id"))
     created_at: Mapped[int] = mapped_column(Integer, default=now_ms)
     updated_at: Mapped[int] = mapped_column(Integer, default=now_ms)
@@ -77,6 +79,11 @@ class Message(Base):
     author_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), index=True)
     text: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[int] = mapped_column(Integer, default=now_ms, index=True)
+    edited_at: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
+    deleted_at: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
+    reply_to_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("messages.id", ondelete="SET NULL"), nullable=True, default=None
+    )
 
     chat: Mapped[Chat] = relationship(back_populates="messages")
 
@@ -155,6 +162,33 @@ class ChatFolder(Base):
     owner_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), index=True)
     name: Mapped[str] = mapped_column(String(40))
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[int] = mapped_column(Integer, default=now_ms)
+
+
+class ChatInvite(Base):
+    __tablename__ = "chat_invites"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    token: Mapped[str] = mapped_column(String(32), unique=True, index=True)
+    chat_id: Mapped[str] = mapped_column(String, ForeignKey("chats.id", ondelete="CASCADE"), index=True)
+    created_by: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"))
+    created_at: Mapped[int] = mapped_column(Integer, default=now_ms)
+    expires_at: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
+    max_uses: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
+    uses: Mapped[int] = mapped_column(Integer, default=0)
+    revoked: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class PostMedia(Base):
+    __tablename__ = "post_media"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    post_id: Mapped[str] = mapped_column(String, ForeignKey("posts.id", ondelete="CASCADE"), index=True)
+    url: Mapped[str] = mapped_column(String(400))
+    kind: Mapped[str] = mapped_column(String(16))  # image|video|audio|file
+    name: Mapped[str] = mapped_column(String(200), default="")
+    size: Mapped[int] = mapped_column(Integer, default=0)
+    mime: Mapped[str] = mapped_column(String(80), default="")
     created_at: Mapped[int] = mapped_column(Integer, default=now_ms)
 
 

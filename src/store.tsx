@@ -50,18 +50,25 @@ type Ctx = {
   signup: (handle: string, name: string, password: string) => Promise<void>
   login: (handle: string, password: string) => Promise<void>
   logout: () => void
-  sendMessage: (chatId: string, text: string) => Promise<void>
+  sendMessage: (chatId: string, text: string, replyToId?: string | null) => Promise<void>
+  editMessage: (chatId: string, messageId: string, text: string) => Promise<void>
+  deleteMessage: (chatId: string, messageId: string) => Promise<void>
+  applyMessageEdit: (chatId: string, msg: Message) => void
+  applyMessageDelete: (chatId: string, messageId: string, deletedAt: number) => void
   createChat: (participantIds: string[], kind?: Chat['kind'], title?: string) => Promise<string>
+  patchChat: (chatId: string, patch: { title?: string; description?: string; isPublic?: boolean }) => Promise<void>
   pinChat: (chatId: string, pinned: boolean) => Promise<void>
   muteChat: (chatId: string, muted: boolean) => Promise<void>
   deleteChat: (chatId: string) => Promise<void>
+  joinViaInvite: (token: string) => Promise<string>
   addEvent: (ev: Omit<CalendarEvent, 'id'>) => Promise<void>
   updateEvent: (id: string, patch: Omit<CalendarEvent, 'id'>) => Promise<void>
   deleteEvent: (id: string) => Promise<void>
   addNote: (title: string) => Promise<string>
   updateNote: (id: string, patch: Partial<Pick<Note, 'title' | 'body' | 'tags'>>) => Promise<void>
   deleteNote: (id: string) => Promise<void>
-  addPost: (text: string) => Promise<void>
+  addPost: (text: string, media?: NewsPost['media']) => Promise<void>
+  deletePost: (id: string) => Promise<void>
   toggleLike: (id: string) => Promise<void>
   repost: (id: string) => Promise<void>
   createFolder: (name: string, chatIds?: string[]) => Promise<string>
@@ -109,7 +116,15 @@ function userFromApi(u: ApiUser): User {
 }
 
 function msgFromApi(m: ApiMessage): Message {
-  return { id: m.id, authorId: m.authorId, text: m.text, at: m.at }
+  return {
+    id: m.id,
+    authorId: m.authorId,
+    text: m.text,
+    at: m.at,
+    editedAt: m.editedAt ?? null,
+    deletedAt: m.deletedAt ?? null,
+    replyToId: m.replyToId ?? null,
+  }
 }
 
 function chatFromApi(c: ApiChat): Chat {
@@ -117,10 +132,14 @@ function chatFromApi(c: ApiChat): Chat {
     id: c.id,
     kind: c.kind,
     title: c.title,
+    description: c.description ?? '',
+    isPublic: !!c.isPublic,
+    createdBy: c.createdBy,
     participants: c.participants,
     messages: c.messages.map(msgFromApi),
     pinned: c.pinned,
     muted: c.muted,
+    role: c.role ?? 'member',
     updatedAt: c.updatedAt,
     lastMessage: c.lastMessage ? msgFromApi(c.lastMessage) : null,
   }
@@ -159,6 +178,7 @@ function postFromApi(p: ApiPost): NewsPost {
     replies: p.replies,
     liked: p.liked,
     reposted: p.reposted,
+    media: p.media ?? [],
   }
 }
 
@@ -316,10 +336,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [hydrate, state.me])
 
   const sendMessage = useCallback(
-    async (chatId: string, text: string) => {
+    async (chatId: string, text: string, replyToId?: string | null) => {
       const trimmed = text.trim()
       if (!trimmed) return
-      const msg = msgFromApi(await api.sendMessage(chatId, trimmed))
+      const msg = msgFromApi(
+        await api.sendMessage(chatId, { text: trimmed, replyToId: replyToId ?? null }),
+      )
       setState((s) => ({
         ...s,
         chats: s.chats
@@ -338,6 +360,86 @@ export function AppProvider({ children }: { children: ReactNode }) {
     },
     [],
   )
+
+  const applyMessageEdit = useCallback((chatId: string, msg: Message) => {
+    setState((s) => ({
+      ...s,
+      chats: s.chats.map((c) =>
+        c.id === chatId
+          ? {
+              ...c,
+              messages: c.messages.map((m) => (m.id === msg.id ? msg : m)),
+              lastMessage: c.lastMessage?.id === msg.id ? msg : c.lastMessage,
+            }
+          : c,
+      ),
+    }))
+  }, [])
+
+  const applyMessageDelete = useCallback(
+    (chatId: string, messageId: string, deletedAt: number) => {
+      setState((s) => ({
+        ...s,
+        chats: s.chats.map((c) =>
+          c.id === chatId
+            ? {
+                ...c,
+                messages: c.messages.map((m) =>
+                  m.id === messageId ? { ...m, text: '', deletedAt } : m,
+                ),
+              }
+            : c,
+        ),
+      }))
+    },
+    [],
+  )
+
+  const editMessage = useCallback(
+    async (chatId: string, messageId: string, text: string) => {
+      const msg = msgFromApi(await api.editMessage(chatId, messageId, text))
+      applyMessageEdit(chatId, msg)
+    },
+    [applyMessageEdit],
+  )
+
+  const deleteMessage = useCallback(
+    async (chatId: string, messageId: string) => {
+      await api.deleteMessage(chatId, messageId)
+      applyMessageDelete(chatId, messageId, Date.now())
+    },
+    [applyMessageDelete],
+  )
+
+  const patchChat = useCallback(
+    async (
+      chatId: string,
+      patch: { title?: string; description?: string; isPublic?: boolean },
+    ) => {
+      const updated = chatFromApi(await api.patchChat(chatId, patch))
+      setState((s) => ({
+        ...s,
+        chats: s.chats.map((c) =>
+          c.id === chatId
+            ? { ...c, ...updated, messages: c.messages, lastMessage: c.lastMessage }
+            : c,
+        ),
+      }))
+    },
+    [],
+  )
+
+  const joinViaInvite = useCallback(async (token: string) => {
+    const chat = chatFromApi(await api.joinViaInvite(token))
+    setState((s) => {
+      const exists = s.chats.find((c) => c.id === chat.id)
+      const chats = exists
+        ? s.chats.map((c) => (c.id === chat.id ? chat : c))
+        : [chat, ...s.chats]
+      return { ...s, chats: chats.sort(sortChats) }
+    })
+    return chat.id
+  }, [])
 
   const addIncomingMessage = useCallback((chatId: string, msg: Message) => {
     setState((s) => ({
@@ -460,11 +562,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setState((s) => ({ ...s, notes: s.notes.filter((n) => n.id !== id) }))
   }, [])
 
-  const addPost = useCallback(async (text: string) => {
+  const addPost = useCallback(async (text: string, media: NewsPost['media'] = []) => {
     const trimmed = text.trim()
-    if (!trimmed) return
-    const p = postFromApi(await api.createPost(trimmed))
+    if (!trimmed && (!media || media.length === 0)) return
+    const p = postFromApi(
+      await api.createPost({
+        text: trimmed,
+        media: (media ?? []).map((m) => ({
+          url: m.url,
+          kind: m.kind,
+          name: m.name,
+          mime: m.mime,
+          size: m.size,
+        })),
+      }),
+    )
     setState((s) => ({ ...s, news: [p, ...s.news] }))
+  }, [])
+
+  const deletePost = useCallback(async (id: string) => {
+    await api.deletePost(id)
+    setState((s) => ({ ...s, news: s.news.filter((n) => n.id !== id) }))
   }, [])
 
   const toggleLike = useCallback(async (id: string) => {
@@ -566,10 +684,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       login,
       logout,
       sendMessage,
+      editMessage,
+      deleteMessage,
+      applyMessageEdit,
+      applyMessageDelete,
       createChat,
+      patchChat,
       pinChat,
       muteChat,
       deleteChat,
+      joinViaInvite,
       addEvent,
       updateEvent,
       deleteEvent,
@@ -577,6 +701,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       updateNote,
       deleteNote,
       addPost,
+      deletePost,
       toggleLike,
       repost,
       createFolder,
@@ -599,10 +724,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       login,
       logout,
       sendMessage,
+      editMessage,
+      deleteMessage,
+      applyMessageEdit,
+      applyMessageDelete,
       createChat,
+      patchChat,
       pinChat,
       muteChat,
       deleteChat,
+      joinViaInvite,
       addEvent,
       updateEvent,
       deleteEvent,
@@ -610,6 +741,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       updateNote,
       deleteNote,
       addPost,
+      deletePost,
       toggleLike,
       repost,
       createFolder,

@@ -386,3 +386,50 @@ export function IconImage({ size = 22, className, stroke = 2 }: IconProps) {
     </svg>
   )
 }
+
+export function IconCopy({ size = 18, className, stroke = 2 }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} stroke="currentColor" strokeWidth={stroke} fill="none" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="9" y="9" width="11" height="11" rx="2" />
+      <path d="M5 15V6a2 2 0 0 1 2-2h9" />
+    </svg>
+  )
+}
+
+export function IconLink({ size = 18, className, stroke = 2 }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} stroke="currentColor" strokeWidth={stroke} fill="none" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 15a4 4 0 0 1 0-6l3-3a4 4 0 0 1 6 6l-1.5 1.5" />
+      <path d="M15 9a4 4 0 0 1 0 6l-3 3a4 4 0 0 1-6-6l1.5-1.5" />
+    </svg>
+  )
+}
+
+export function IconEdit({ size = 18, className, stroke = 2 }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} stroke="currentColor" strokeWidth={stroke} fill="none" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 20h4l11-11-4-4L4 16v4z" />
+    </svg>
+  )
+}
+
+export function IconForward({ size = 18, className, stroke = 2 }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} stroke="currentColor" strokeWidth={stroke} fill="none" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="15 17 20 12 15 7" />
+      <path d="M4 18v-2a4 4 0 0 1 4-4h12" />
+    </svg>
+  )
+}
+
+export function IconScan({ size = 20, className, stroke = 2 }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} stroke="currentColor" strokeWidth={stroke} fill="none" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 7V5a2 2 0 0 1 2-2h2" />
+      <path d="M21 7V5a2 2 0 0 0-2-2h-2" />
+      <path d="M3 17v2a2 2 0 0 0 2 2h2" />
+      <path d="M21 17v2a2 2 0 0 1-2 2h-2" />
+      <line x1="3" y1="12" x2="21" y2="12" />
+    </svg>
+  )
+}

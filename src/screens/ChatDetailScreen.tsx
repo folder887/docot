@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useApp } from '../store'
 import { relTime, t } from '../i18n'
@@ -6,23 +6,41 @@ import { ScreenHeader } from '../components/ScreenHeader'
 import { Avatar } from '../components/Avatar'
 import { ChatComposer } from '../components/ChatComposer'
 import { MessageContent } from '../components/MessageBubble'
+import { Modal, ConfirmDialog } from '../components/Modal'
 import { api, getToken, openChatWebSocket } from '../api'
 import type { Message } from '../types'
 
 export function ChatDetailScreen() {
   const { id } = useParams<{ id: string }>()
-  const { state, sendMessage, peerOf, userById, loadUser, addIncomingMessage } = useApp()
+  const {
+    state,
+    sendMessage,
+    peerOf,
+    userById,
+    loadUser,
+    addIncomingMessage,
+    editMessage,
+    deleteMessage,
+    applyMessageEdit,
+    applyMessageDelete,
+  } = useApp()
   const navigate = useNavigate()
   const chat = useMemo(() => state.chats.find((c) => c.id === id), [id, state.chats])
   const peer = chat ? peerOf(chat) : null
   const endRef = useRef<HTMLDivElement>(null)
   const myId = state.me?.id
 
+  const [actionFor, setActionFor] = useState<Message | null>(null)
+  const [editing, setEditing] = useState<{ id: string; text: string } | null>(null)
+  const [replyTo, setReplyTo] = useState<{ id: string; preview: string; author?: string } | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState<Message | null>(null)
+  const [forwardOpen, setForwardOpen] = useState<Message | null>(null)
+  const [copied, setCopied] = useState(false)
+
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [chat?.messages.length])
 
-  // pre-load any unknown participants so bubbles render author name/avatar
   useEffect(() => {
     if (!chat) return
     for (const pid of chat.participants) {
@@ -31,7 +49,6 @@ export function ChatDetailScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chat?.id])
 
-  // load full message history once on open
   useEffect(() => {
     if (!id) return
     void api
@@ -47,7 +64,6 @@ export function ChatDetailScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
-  // live websocket: accept new messages from others
   useEffect(() => {
     if (!chat) return
     const tok = getToken()
@@ -55,11 +71,20 @@ export function ChatDetailScreen() {
     const ws = openChatWebSocket(chat.id, tok)
     ws.onmessage = (ev) => {
       try {
-        const data = JSON.parse(ev.data) as { type: string; message?: Message }
+        const data = JSON.parse(ev.data) as {
+          type: string
+          message?: Message
+          messageId?: string
+          deletedAt?: number
+        }
         if (data.type === 'message' && data.message) {
           if (data.message.authorId !== myId) {
             addIncomingMessage(chat.id, data.message)
           }
+        } else if (data.type === 'message_edited' && data.message) {
+          applyMessageEdit(chat.id, data.message)
+        } else if (data.type === 'message_deleted' && data.messageId) {
+          applyMessageDelete(chat.id, data.messageId, data.deletedAt ?? Date.now())
         }
       } catch {
         /* ignore */
@@ -103,6 +128,28 @@ export function ChatDetailScreen() {
     }
   }
 
+  const messageById = (mid: string) => chat.messages.find((m) => m.id === mid) ?? null
+
+  const onSend = (text0: string) => {
+    void sendMessage(chat.id, text0, replyTo?.id ?? null)
+    setReplyTo(null)
+  }
+
+  const onSubmitEdit = (mid: string, text0: string) => {
+    void editMessage(chat.id, mid, text0)
+    setEditing(null)
+  }
+
+  const onCopy = async (m: Message) => {
+    try {
+      await navigator.clipboard.writeText(m.text || '')
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1200)
+    } catch {
+      /* ignore */
+    }
+  }
+
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-paper">
       <ScreenHeader
@@ -124,9 +171,16 @@ export function ChatDetailScreen() {
         {chat.messages.map((m, i) => {
           const mine = m.authorId === myId
           const author = userById(m.authorId)
-          const showAvatar = !mine && chat.kind !== 'dm' && (i === 0 || chat.messages[i - 1].authorId !== m.authorId)
+          const showAvatar =
+            !mine && chat.kind !== 'dm' && (i === 0 || chat.messages[i - 1].authorId !== m.authorId)
+          const replyMsg = m.replyToId ? messageById(m.replyToId) : null
+          const replyAuthor = replyMsg ? userById(replyMsg.authorId) : null
+          const isDeleted = !!m.deletedAt
           return (
-            <div key={m.id} className={`relative z-10 flex items-end gap-2 bubble-in ${mine ? 'justify-end' : 'justify-start'}`}>
+            <div
+              key={m.id}
+              className={`relative z-10 flex items-end gap-2 bubble-in ${mine ? 'justify-end' : 'justify-start'}`}
+            >
               {!mine && chat.kind !== 'dm' && (
                 <button
                   onClick={() => author && navigate(`/profile/${author.id}`)}
@@ -135,8 +189,23 @@ export function ChatDetailScreen() {
                   <Avatar name={author?.name ?? '?'} size={28} filled />
                 </button>
               )}
-              <div
-                className={`max-w-[78%] rounded-2xl border-2 border-ink px-3 py-2 text-sm`}
+              <button
+                onContextMenu={(e) => {
+                  if (isDeleted) return
+                  e.preventDefault()
+                  setActionFor(m)
+                }}
+                onTouchStart={(e) => {
+                  if (isDeleted) return
+                  const start = Date.now()
+                  const target = e.currentTarget
+                  const onEnd = () => {
+                    target.removeEventListener('touchend', onEnd)
+                    if (Date.now() - start > 450) setActionFor(m)
+                  }
+                  target.addEventListener('touchend', onEnd, { once: true })
+                }}
+                className="block max-w-[78%] rounded-2xl border-2 border-ink px-3 py-2 text-left text-sm"
                 style={{
                   background: mine ? 'var(--mine-bg)' : 'var(--theirs-bg)',
                   color: mine ? 'var(--mine-fg)' : 'var(--theirs-fg)',
@@ -144,23 +213,194 @@ export function ChatDetailScreen() {
               >
                 {!mine && chat.kind !== 'dm' && showAvatar && author && (
                   <button
-                    onClick={() => navigate(`/profile/${author.id}`)}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      navigate(`/profile/${author.id}`)
+                    }}
                     className="mb-0.5 block text-left text-[11px] font-black"
                   >
                     {author.name}
                   </button>
                 )}
-                <MessageContent text={m.text} />
-                <div className={`mt-1 text-right text-[10px] opacity-70`}>
-                  {relTime(m.at, state.lang)}
+                {replyMsg && (
+                  <div
+                    className="mb-1 cursor-pointer rounded-md border-l-2 border-current/40 bg-current/10 px-2 py-1 text-[11px]"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      const el = document.getElementById(`msg-${replyMsg.id}`)
+                      el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                    }}
+                  >
+                    <div className="font-bold opacity-80">
+                      {replyAuthor?.name ?? '?'}
+                    </div>
+                    <div className="truncate opacity-70">{replyMsg.text || '…'}</div>
+                  </div>
+                )}
+                <div id={`msg-${m.id}`} />
+                {isDeleted ? (
+                  <p className="italic opacity-60">{t('msg.deleted', state.lang)}</p>
+                ) : (
+                  <MessageContent text={m.text} />
+                )}
+                <div className="mt-1 flex items-center justify-end gap-1.5 text-[10px] opacity-70">
+                  {m.editedAt && !isDeleted && <span>{t('msg.edited', state.lang)}</span>}
+                  <span>{relTime(m.at, state.lang)}</span>
                 </div>
-              </div>
+              </button>
             </div>
           )
         })}
         <div ref={endRef} />
       </div>
-      <ChatComposer onSend={(t0) => void sendMessage(chat.id, t0)} />
+      <ChatComposer
+        onSend={onSend}
+        editing={editing}
+        onSubmitEdit={onSubmitEdit}
+        onCancelEdit={() => setEditing(null)}
+        replyTo={replyTo}
+        onCancelReply={() => setReplyTo(null)}
+      />
+
+      {/* Long-press / right-click action sheet */}
+      <Modal open={!!actionFor} onClose={() => setActionFor(null)} title={t('msg.copy', state.lang)}>
+        {actionFor && (
+          <ul className="flex flex-col gap-1 text-base font-bold">
+            <Sheet
+              label={t('msg.reply', state.lang)}
+              onClick={() => {
+                const author = userById(actionFor.authorId)
+                setReplyTo({
+                  id: actionFor.id,
+                  preview: actionFor.text || '…',
+                  author: author?.name ? `@${author.handle ?? author.id}` : undefined,
+                })
+                setActionFor(null)
+              }}
+            />
+            <Sheet
+              label={t('msg.copy', state.lang)}
+              onClick={() => {
+                void onCopy(actionFor)
+                setActionFor(null)
+              }}
+            />
+            <Sheet
+              label={t('msg.forward', state.lang)}
+              onClick={() => {
+                setForwardOpen(actionFor)
+                setActionFor(null)
+              }}
+            />
+            {actionFor.authorId === myId && (
+              <Sheet
+                label={t('msg.edit', state.lang)}
+                onClick={() => {
+                  setEditing({ id: actionFor.id, text: actionFor.text })
+                  setActionFor(null)
+                }}
+              />
+            )}
+            <Sheet
+              destructive
+              label={t('msg.delete', state.lang)}
+              onClick={() => {
+                setConfirmDelete(actionFor)
+                setActionFor(null)
+              }}
+            />
+          </ul>
+        )}
+      </Modal>
+
+      <ConfirmDialog
+        open={!!confirmDelete}
+        message={t('msg.confirmDelete', state.lang)}
+        okLabel={t('common.delete', state.lang)}
+        cancelLabel={t('common.cancel', state.lang)}
+        destructive
+        onResolve={(ok) => {
+          const m = confirmDelete
+          setConfirmDelete(null)
+          if (ok && m) void deleteMessage(chat.id, m.id)
+        }}
+      />
+
+      {forwardOpen && (
+        <ForwardSheet
+          message={forwardOpen}
+          onClose={() => setForwardOpen(null)}
+          currentChatId={chat.id}
+        />
+      )}
+
+      {copied && (
+        <div className="pointer-events-none fixed bottom-24 left-1/2 z-[80] -translate-x-1/2 rounded-full bg-ink px-4 py-1.5 text-xs font-bold text-paper">
+          {t('common.copied', state.lang)}
+        </div>
+      )}
     </div>
+  )
+}
+
+function Sheet({
+  label,
+  onClick,
+  destructive,
+}: {
+  label: string
+  onClick: () => void
+  destructive?: boolean
+}) {
+  return (
+    <li>
+      <button
+        onClick={onClick}
+        className={`row-press w-full rounded-xl px-3 py-3 text-left ${
+          destructive ? 'underline decoration-ink underline-offset-4' : ''
+        }`}
+      >
+        {label}
+      </button>
+    </li>
+  )
+}
+
+function ForwardSheet({
+  message,
+  onClose,
+  currentChatId,
+}: {
+  message: Message
+  onClose: () => void
+  currentChatId: string
+}) {
+  const { state, sendMessage } = useApp()
+  const candidates = state.chats.filter((c) => c.id !== currentChatId)
+  return (
+    <Modal open onClose={onClose} title={t('msg.forward', state.lang)}>
+      <ul className="flex max-h-[50vh] flex-col gap-1 overflow-y-auto">
+        {candidates.length === 0 && (
+          <li className="text-center text-sm text-muted">No other chats</li>
+        )}
+        {candidates.map((c) => (
+          <li key={c.id}>
+            <button
+              onClick={async () => {
+                await sendMessage(c.id, message.text || '')
+                onClose()
+              }}
+              className="row-press flex w-full items-center gap-3 rounded-2xl border border-line px-3 py-2 text-left"
+            >
+              <Avatar name={c.title} size={36} filled />
+              <span className="min-w-0 flex-1 truncate font-bold">{c.title}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+      <button className="bw-btn-ghost mt-3 w-full" onClick={onClose}>
+        {t('common.close', state.lang)}
+      </button>
+    </Modal>
   )
 }
