@@ -29,6 +29,7 @@ function deKeyPair(s: SerializedKeyPair | undefined): KeyPairType | undefined {
 const META = {
   identity: 'identityKeyPair',
   registrationId: 'registrationId',
+  deviceId: 'deviceId',
 } as const
 
 export class SignalProtocolStore implements StorageType {
@@ -39,6 +40,21 @@ export class SignalProtocolStore implements StorageType {
   async setIdentity(kp: KeyPairType, registrationId: number): Promise<void> {
     await idbPut(STORES.meta, META.identity, serKeyPair(kp))
     await idbPut(STORES.meta, META.registrationId, registrationId)
+  }
+
+  /**
+   * Each browser/app install gets its own deviceId so multiple devices for the
+   * same user can coexist. Generated lazily and pinned in IDB.
+   */
+  async getOrCreateDeviceId(): Promise<number> {
+    const existing = await idbGet<number>(STORES.meta, META.deviceId)
+    if (typeof existing === 'number' && existing > 0) return existing
+    // 1 is reserved for legacy single-device clients (the initial public release
+    // shipped with DEVICE_ID = 1 hard-coded). New installs draw from
+    // [2, 2^31 - 1].
+    const id = 2 + Math.floor(Math.random() * (0x7fff_fffe - 1))
+    await idbPut(STORES.meta, META.deviceId, id)
+    return id
   }
 
   // ---------- StorageType interface ----------

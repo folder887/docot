@@ -133,7 +133,20 @@ function msgFromApi(m: ApiMessage): Message {
     editedAt: m.editedAt ?? null,
     deletedAt: m.deletedAt ?? null,
     replyToId: m.replyToId ?? null,
+    sealed: m.sealed ?? false,
   }
+}
+
+/** For sealed-sender messages the API returns an empty `authorId`; substitute
+ * the other DM participant so UI rendering, mention checks, and re-decryption
+ * have a concrete sender id to work with. Non-DM chats and unsealed messages
+ * are returned untouched. */
+function deanonymise(me: User, chatLike: { kind: string; participants: string[] } | undefined, m: Message): Message {
+  if (!m.sealed || m.authorId) return m
+  if (!chatLike || chatLike.kind !== 'dm') return m
+  const other = chatLike.participants.find((p) => p !== me.id)
+  if (!other) return m
+  return { ...m, authorId: other }
 }
 
 /** Resolve a single (possibly-encrypted) message to its plaintext form using
@@ -146,11 +159,15 @@ async function resolvePlaintext(
   if (!isEncryptedEnvelope(m.text)) return null
   if (m.authorId === me.id) {
     const cached = await recallOutgoing(m.id)
-    return { ...m, text: cached ?? '' }
+    if (cached !== undefined) return { ...m, text: cached }
+    // Sibling-device path: decrypt the self-sync entry and seed cache.
+    const plain = await maybeDecrypt(me.id, me.id, m.text)
+    if (plain) rememberOutgoing(m.id, plain).catch(() => {})
+    return { ...m, text: plain }
   }
   const cachedIn = await recallIncoming(m.id)
   if (cachedIn !== undefined) return { ...m, text: cachedIn }
-  const plain = await maybeDecrypt(peerId, m.text)
+  const plain = await maybeDecrypt(me.id, peerId, m.text)
   if (plain) {
     rememberIncoming(m.id, plain).catch(() => {})
   }
@@ -200,7 +217,10 @@ async function decryptHistory(
   }
 }
 
-function chatFromApi(c: ApiChat): Chat {
+function chatFromApi(c: ApiChat, meId?: string): Chat {
+  const stub = { kind: c.kind, participants: c.participants }
+  const fixSealed = (m: Message) =>
+    meId ? deanonymise({ id: meId } as User, stub, m) : m
   return {
     id: c.id,
     kind: c.kind,
@@ -209,12 +229,12 @@ function chatFromApi(c: ApiChat): Chat {
     isPublic: !!c.isPublic,
     createdBy: c.createdBy,
     participants: c.participants,
-    messages: c.messages.map(msgFromApi),
+    messages: c.messages.map((m) => fixSealed(msgFromApi(m))),
     pinned: c.pinned,
     muted: c.muted,
     role: c.role ?? 'member',
     updatedAt: c.updatedAt,
-    lastMessage: c.lastMessage ? msgFromApi(c.lastMessage) : null,
+    lastMessage: c.lastMessage ? fixSealed(msgFromApi(c.lastMessage)) : null,
   }
 }
 
@@ -339,7 +359,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const usersIdx: Record<string, User> = {}
     for (const u of allUsers) usersIdx[u.id] = u
 
-    const mappedChats = chats.map(chatFromApi).sort(sortChats)
+    const mappedChats = chats.map((c) => chatFromApi(c, me.id)).sort(sortChats)
     setState((s) => ({
       ...s,
       status: 'authed',
@@ -428,9 +448,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
         ? chat.participants.find((p) => p !== state.me?.id) ?? null
         : null
       let payload = trimmed
-      if (peerId) {
+      let sealed = false
+      if (peerId && state.me) {
         try {
-          payload = await encryptForUser(peerId, trimmed)
+          payload = await encryptForUser(state.me.id, peerId, trimmed)
+          // Only enable sealed-sender on successful encryption: a plaintext
+          // fallback message has no inner Signal envelope to verify the
+          // sender, so the recipient would have nothing but chat membership
+          // to go on.
+          sealed = true
         } catch (err) {
           console.warn('encrypt failed, sending plaintext', err)
         }
@@ -438,8 +464,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const apiMsg = await api.sendMessage(chatId, {
         text: payload,
         replyToId: replyToId ?? null,
+        sealed,
       })
-      const msg: Message = { ...msgFromApi(apiMsg), text: trimmed }
+      // The server returns authorId="" for sealed messages; restore our own
+      // id locally so the rest of the UI behaves as if the send was attributed.
+      const msg: Message = {
+        ...msgFromApi(apiMsg),
+        authorId: state.me ? state.me.id : apiMsg.authorId,
+        text: trimmed,
+      }
       if (peerId) {
         rememberOutgoing(msg.id, trimmed).catch(() => {})
       }
@@ -463,23 +496,40 @@ export function AppProvider({ children }: { children: ReactNode }) {
   )
 
   const applyMessageEdit = useCallback(async (chatId: string, msg: Message) => {
-    let final = msg
     const chat = chatsRef.current.find((c) => c.id === chatId)
-    if (chat?.kind === 'dm' && isEncryptedEnvelope(msg.text) && state.me) {
-      if (msg.authorId === state.me.id) {
+    const incoming = state.me ? deanonymise(state.me, chat, msg) : msg
+    let final = incoming
+    if (chat?.kind === 'dm' && isEncryptedEnvelope(incoming.text) && state.me) {
+      if (incoming.authorId === state.me.id) {
         // Our own edit is also written to the outgoing cache by editMessage,
-        // so this picks up the new plaintext (not the pre-edit one).
-        const cached = await recallOutgoing(msg.id)
-        final = { ...msg, text: cached ?? '' }
+        // so this picks up the new plaintext (not the pre-edit one). Sibling
+        // devices missing the cache fall back to decrypting the self-sync
+        // entry inside the multi-recipient envelope.
+        const cached = await recallOutgoing(incoming.id)
+        if (cached !== undefined) {
+          final = { ...incoming, text: cached }
+        } else {
+          const plain = await maybeDecrypt(
+            state.me.id,
+            incoming.authorId,
+            incoming.text,
+          )
+          if (plain) rememberOutgoing(incoming.id, plain).catch(() => {})
+          final = { ...incoming, text: plain }
+        }
       } else {
         // Incoming edits change the ciphertext but reuse the original
         // message id, so the cached incoming plaintext is stale. Always
         // re-decrypt and refresh the cache.
-        const plain = await maybeDecrypt(msg.authorId, msg.text)
+        const plain = await maybeDecrypt(
+          state.me.id,
+          incoming.authorId,
+          incoming.text,
+        )
         if (plain) {
-          rememberIncoming(msg.id, plain).catch(() => {})
+          rememberIncoming(incoming.id, plain).catch(() => {})
         }
-        final = { ...msg, text: plain }
+        final = { ...incoming, text: plain }
       }
     }
     setState((s) => ({
@@ -524,15 +574,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
         ? chat.participants.find((p) => p !== state.me?.id) ?? null
         : null
       let payload = trimmed
-      if (peerId) {
+      let sealed = false
+      if (peerId && state.me) {
         try {
-          payload = await encryptForUser(peerId, trimmed)
+          payload = await encryptForUser(state.me.id, peerId, trimmed)
+          sealed = true
         } catch (err) {
           console.warn('encrypt edit failed, sending plaintext', err)
         }
       }
-      const apiMsg = await api.editMessage(chatId, messageId, payload)
-      const msg: Message = { ...msgFromApi(apiMsg), text: trimmed }
+      const apiMsg = await api.editMessage(chatId, messageId, payload, sealed)
+      const msg: Message = {
+        ...msgFromApi(apiMsg),
+        authorId: state.me ? state.me.id : apiMsg.authorId,
+        text: trimmed,
+      }
       if (peerId) {
         rememberOutgoing(msg.id, trimmed).catch(() => {})
       }
@@ -554,7 +610,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       chatId: string,
       patch: { title?: string; description?: string; isPublic?: boolean },
     ) => {
-      const updated = chatFromApi(await api.patchChat(chatId, patch))
+      const updated = chatFromApi(await api.patchChat(chatId, patch), state.me?.id)
       setState((s) => ({
         ...s,
         chats: s.chats.map((c) =>
@@ -564,11 +620,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         ),
       }))
     },
-    [],
+    [state.me?.id],
   )
 
   const joinViaInvite = useCallback(async (token: string) => {
-    const chat = chatFromApi(await api.joinViaInvite(token))
+    const chat = chatFromApi(await api.joinViaInvite(token), state.me?.id)
     setState((s) => {
       const exists = s.chats.find((c) => c.id === chat.id)
       const chats = exists
@@ -577,30 +633,47 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return { ...s, chats: chats.sort(sortChats) }
     })
     return chat.id
-  }, [])
+  }, [state.me?.id])
 
   const addIncomingMessage = useCallback(
     async (chatId: string, msg: Message) => {
-      let final = msg
       // Only DM chats are E2E-encrypted; group/channel ciphertext (if any)
       // is not for us — treat it as plaintext to avoid corrupting state with
       // empty-string decrypt failures.
       const chat = chatsRef.current.find((c) => c.id === chatId)
+      // Sealed-sender messages arrive with authorId="" — re-derive from the
+      // chat membership before any further processing, otherwise we can't
+      // tell our own send from a peer's send and cache lookups break.
+      const incoming = state.me ? deanonymise(state.me, chat, msg) : msg
+      let final = incoming
       const isDm = chat?.kind === 'dm'
-      if (isDm && isEncryptedEnvelope(msg.text) && state.me) {
-        if (msg.authorId === state.me.id) {
-          // Our own outgoing ciphertext — we never had the key, restore from
-          // the local plaintext cache populated at send time.
-          const cached = await recallOutgoing(msg.id)
-          final = { ...msg, text: cached ?? '' }
-        } else {
-          const cached = await recallIncoming(msg.id)
-          const plain =
-            cached !== undefined ? cached : await maybeDecrypt(msg.authorId, msg.text)
-          if (cached === undefined && plain) {
-            rememberIncoming(msg.id, plain).catch(() => {})
+      if (isDm && isEncryptedEnvelope(incoming.text) && state.me) {
+        if (incoming.authorId === state.me.id) {
+          // Our own outgoing ciphertext. The sending device cached it locally
+          // before send; sibling devices fall back to decrypting the
+          // self-sync entry inside the multi-recipient envelope.
+          const cached = await recallOutgoing(incoming.id)
+          if (cached !== undefined) {
+            final = { ...incoming, text: cached }
+          } else {
+            const plain = await maybeDecrypt(
+              state.me.id,
+              incoming.authorId,
+              incoming.text,
+            )
+            if (plain) rememberOutgoing(incoming.id, plain).catch(() => {})
+            final = { ...incoming, text: plain }
           }
-          final = { ...msg, text: plain }
+        } else {
+          const cached = await recallIncoming(incoming.id)
+          const plain =
+            cached !== undefined
+              ? cached
+              : await maybeDecrypt(state.me.id, incoming.authorId, incoming.text)
+          if (cached === undefined && plain) {
+            rememberIncoming(incoming.id, plain).catch(() => {})
+          }
+          final = { ...incoming, text: plain }
         }
       }
       setState((s) => ({
@@ -632,7 +705,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         title,
         participantIds,
       }
-      const chat = chatFromApi(await api.createChat(body))
+      const chat = chatFromApi(await api.createChat(body), state.me?.id)
       setState((s) => {
         const existing = s.chats.find((c) => c.id === chat.id)
         const chats = existing
@@ -642,7 +715,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       })
       return chat.id
     },
-    [],
+    [state.me?.id],
   )
 
   const pinChat = useCallback(async (chatId: string, pinned: boolean) => {

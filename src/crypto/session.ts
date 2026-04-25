@@ -1,13 +1,21 @@
 /**
  * High-level helpers used by the rest of the app:
  *
- *   - `encryptForUser(userId, plaintext)` — establishes a Signal session if
- *     needed (X3DH from a freshly-fetched bundle), then encrypts via the
- *     Double Ratchet.
- *   - `decryptFromUser(userId, envelope)` — decrypts an incoming envelope.
+ *   - `encryptForUser(myId, peerId, plaintext)` — for every device the peer
+ *     has registered (and every other device of mine, for self-sync) build a
+ *     Signal session if needed, encrypt the plaintext, and pack the resulting
+ *     ciphertexts into a single multi-recipient envelope.
+ *   - `decryptFromUser(myId, senderId, envelope)` — locate the entry addressed
+ *     to *this* device, decrypt via the matching Signal session.
  *
- * Messages are wrapped in a JSON envelope and base64-encoded with a
- * `__sig1:` marker. The marker is what other code uses to detect ciphertext.
+ * Two wire formats coexist:
+ *
+ *   `__sig1:`  legacy single-recipient envelope (deviceId hard-coded to 1).
+ *   `__sig1m:` multi-recipient envelope used when either side has registered
+ *              a non-default deviceId. Includes the sender's deviceId so the
+ *              receiver builds a session against the right address.
+ *
+ * Both formats are accepted on decryption; new sends always use `__sig1m:`.
  */
 
 import {
@@ -18,69 +26,98 @@ import {
 
 import { api } from '../api'
 import { ab2b64, b642ab, ab2utf8, utf82ab } from './encoding'
+import { localDeviceId } from './identity'
 import { signalStore } from './store'
 
-const DEVICE_ID = 1
-const ENVELOPE_PREFIX = '__sig1:'
+const LEGACY_DEVICE_ID = 1
+const ENVELOPE_PREFIX_LEGACY = '__sig1:'
+const ENVELOPE_PREFIX_MULTI = '__sig1m:'
 
-type Envelope = {
-  v: 1
+/** One ciphertext addressed to a single (uid, deviceId) recipient. */
+type Recipient = {
+  /** Recipient userId. */
+  uid: string
+  /** Recipient deviceId. */
+  did: number
   /** 1 = WhisperMessage, 3 = PreKeyWhisperMessage. */
   t: 1 | 3
-  /** registrationId of the sender. */
+  /** Sender registrationId. */
   r: number
-  /** base64 ciphertext body (libsignal `body`). */
+  /** Base64 ciphertext body. */
+  b: string
+}
+
+type MultiEnvelope = {
+  v: 2
+  /** Sender deviceId — needed so receivers address the right session. */
+  s: number
+  rcpts: Recipient[]
+}
+
+type LegacyEnvelope = {
+  v: 1
+  t: 1 | 3
+  r: number
   b: string
 }
 
 export function isEncryptedEnvelope(text: string): boolean {
-  return typeof text === 'string' && text.startsWith(ENVELOPE_PREFIX)
+  return (
+    typeof text === 'string' &&
+    (text.startsWith(ENVELOPE_PREFIX_LEGACY) || text.startsWith(ENVELOPE_PREFIX_MULTI))
+  )
 }
 
-export function encodeEnvelope(env: Envelope): string {
-  return ENVELOPE_PREFIX + btoa(JSON.stringify(env))
-}
-
-export function decodeEnvelope(text: string): Envelope | null {
-  if (!isEncryptedEnvelope(text)) return null
+function decodeMulti(text: string): MultiEnvelope | null {
+  if (!text.startsWith(ENVELOPE_PREFIX_MULTI)) return null
   try {
-    const json = atob(text.slice(ENVELOPE_PREFIX.length))
-    return JSON.parse(json) as Envelope
+    return JSON.parse(atob(text.slice(ENVELOPE_PREFIX_MULTI.length))) as MultiEnvelope
   } catch {
     return null
   }
 }
 
-function addressFor(userId: string): SignalProtocolAddress {
-  return new SignalProtocolAddress(userId, DEVICE_ID)
+function decodeLegacy(text: string): LegacyEnvelope | null {
+  if (!text.startsWith(ENVELOPE_PREFIX_LEGACY)) return null
+  try {
+    return JSON.parse(atob(text.slice(ENVELOPE_PREFIX_LEGACY.length))) as LegacyEnvelope
+  } catch {
+    return null
+  }
+}
+
+function addressFor(userId: string, deviceId: number): SignalProtocolAddress {
+  return new SignalProtocolAddress(userId, deviceId)
 }
 
 /**
- * Per-peer serialization. Signal's Double Ratchet mutates session state on
- * every encrypt and decrypt; concurrent operations against the same address
- * race on read-modify-write of the IDB session blob and corrupt the ratchet.
- *
- * We chain every session-touching call through a per-userId promise so they
- * run strictly in order while still allowing different peers to proceed in
- * parallel.
+ * Per-(peer, device) serialization. Signal's Double Ratchet mutates session
+ * state on every encrypt and decrypt; concurrent operations on the same
+ * address race on read-modify-write of the IDB session blob and corrupt the
+ * ratchet. We chain every session-touching call through a per-address promise
+ * so they run strictly in order while still allowing different addresses to
+ * proceed in parallel.
  */
 const sessionLocks = new Map<string, Promise<unknown>>()
-function withSessionLock<T>(userId: string, fn: () => Promise<T>): Promise<T> {
-  const prev = sessionLocks.get(userId) ?? Promise.resolve()
+function withSessionLock<T>(addrKey: string, fn: () => Promise<T>): Promise<T> {
+  const prev = sessionLocks.get(addrKey) ?? Promise.resolve()
   const next = prev.then(fn, fn)
   sessionLocks.set(
-    userId,
+    addrKey,
     next.catch(() => undefined),
   )
   return next
 }
 
-async function ensureSession(userId: string): Promise<void> {
-  const address = addressFor(userId)
+async function ensureSessionFromBundle(
+  userId: string,
+  deviceId: number,
+): Promise<void> {
+  const address = addressFor(userId, deviceId)
   const existing = await signalStore.loadSession(address.toString())
   if (existing) return
 
-  const bundle = await api.getKeyBundle(userId)
+  const bundle = await api.getKeyBundleForDevice(userId, deviceId)
   const builder = new SessionBuilder(signalStore, address)
   await builder.processPreKey({
     identityKey: b642ab(bundle.identityKey),
@@ -96,50 +133,139 @@ async function ensureSession(userId: string): Promise<void> {
   })
 }
 
-export function encryptForUser(userId: string, plaintext: string): Promise<string> {
-  return withSessionLock(userId, () => _encryptForUser(userId, plaintext))
-}
-
-async function _encryptForUser(userId: string, plaintext: string): Promise<string> {
-  await ensureSession(userId)
-  const cipher = new SessionCipher(signalStore, addressFor(userId))
-  const ct = await cipher.encrypt(utf82ab(plaintext))
+function normaliseBody(body: unknown): string {
   // libsignal returns `body` as a binary string in some builds. Normalise to
   // base64 so the wire format is JSON-friendly.
-  let bodyB64: string
-  const body: unknown = ct.body
   if (typeof body === 'string') {
     let s = ''
-    for (let i = 0; i < body.length; i++) {
-      s += String.fromCharCode(body.charCodeAt(i) & 0xff)
-    }
-    bodyB64 = btoa(s)
-  } else if (body instanceof ArrayBuffer) {
-    bodyB64 = ab2b64(body)
-  } else {
-    throw new Error('libsignal returned empty ciphertext')
+    for (let i = 0; i < body.length; i++) s += String.fromCharCode(body.charCodeAt(i) & 0xff)
+    return btoa(s)
   }
-  return encodeEnvelope({
-    v: 1,
-    t: ct.type as 1 | 3,
-    r: ct.registrationId ?? 0,
-    b: bodyB64,
+  if (body instanceof ArrayBuffer) return ab2b64(body)
+  throw new Error('libsignal returned empty ciphertext')
+}
+
+async function encryptOneRecipient(
+  userId: string,
+  deviceId: number,
+  plaintext: string,
+): Promise<Recipient> {
+  return withSessionLock(`${userId}:${deviceId}`, async () => {
+    await ensureSessionFromBundle(userId, deviceId)
+    const cipher = new SessionCipher(signalStore, addressFor(userId, deviceId))
+    const ct = await cipher.encrypt(utf82ab(plaintext))
+    return {
+      uid: userId,
+      did: deviceId,
+      t: ct.type as 1 | 3,
+      r: ct.registrationId ?? 0,
+      b: normaliseBody(ct.body),
+    }
   })
 }
 
-export function decryptFromUser(userId: string, text: string): Promise<string> {
-  return withSessionLock(userId, () => _decryptFromUser(userId, text))
+/**
+ * Encrypt `plaintext` for every device of `peerId` plus every *other* device
+ * of `myId` (so my own siblings see the message).
+ *
+ * If neither side has registered any devices yet (e.g. a brand-new account
+ * whose bundle hasn't reached the server) the call falls back to the legacy
+ * single-device format keyed at deviceId=1 — keeps interop with old clients.
+ */
+export async function encryptForUser(
+  myId: string,
+  peerId: string,
+  plaintext: string,
+): Promise<string> {
+  const myDeviceId = await localDeviceId()
+  const [peerDevices, myDevices] = await Promise.all([
+    listDevicesSafe(peerId),
+    listDevicesSafe(myId),
+  ])
+
+  const targets: { uid: string; did: number }[] = []
+  for (const d of peerDevices) targets.push({ uid: peerId, did: d })
+  for (const d of myDevices) {
+    if (d !== myDeviceId) targets.push({ uid: myId, did: d })
+  }
+
+  if (targets.length === 0) {
+    // No devices known yet — try the legacy DEVICE_ID = 1 endpoint as a last
+    // resort. This handles peers running the pre-multi-device build.
+    targets.push({ uid: peerId, did: LEGACY_DEVICE_ID })
+  }
+
+  const recipients = await Promise.all(
+    targets.map(({ uid, did }) => encryptOneRecipient(uid, did, plaintext)),
+  )
+  const env: MultiEnvelope = { v: 2, s: myDeviceId, rcpts: recipients }
+  return ENVELOPE_PREFIX_MULTI + btoa(JSON.stringify(env))
 }
 
-async function _decryptFromUser(userId: string, text: string): Promise<string> {
-  const env = decodeEnvelope(text)
-  if (!env) throw new Error('not_encrypted')
-  const cipher = new SessionCipher(signalStore, addressFor(userId))
-  const body = b642ab(env.b)
-  const plain = env.t === 3
-    ? await cipher.decryptPreKeyWhisperMessage(body)
-    : await cipher.decryptWhisperMessage(body)
-  return ab2utf8(plain)
+async function listDevicesSafe(userId: string): Promise<number[]> {
+  try {
+    const r = await api.listUserDevices(userId)
+    return r.devices.map((d) => d.deviceId)
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Decrypt an incoming envelope addressed to (myId, current device). Throws if
+ * the envelope is malformed or doesn't carry an entry for this device.
+ */
+export async function decryptFromUser(
+  myId: string,
+  senderId: string,
+  text: string,
+): Promise<string> {
+  const myDeviceId = await localDeviceId()
+
+  const multi = decodeMulti(text)
+  if (multi) {
+    const entry = multi.rcpts.find(
+      (r) => r.uid === myId && r.did === myDeviceId,
+    )
+    if (!entry) {
+      // Some peer's old build sent only to deviceId=1 (the legacy bundle).
+      // Try that fallback before giving up.
+      const fallback = multi.rcpts.find(
+        (r) => r.uid === myId && r.did === LEGACY_DEVICE_ID,
+      )
+      if (!fallback) throw new Error('no_entry_for_device')
+      return runDecrypt(senderId, multi.s, fallback)
+    }
+    return runDecrypt(senderId, multi.s, entry)
+  }
+
+  const legacy = decodeLegacy(text)
+  if (legacy) {
+    return runDecrypt(senderId, LEGACY_DEVICE_ID, {
+      uid: myId,
+      did: LEGACY_DEVICE_ID,
+      t: legacy.t,
+      r: legacy.r,
+      b: legacy.b,
+    })
+  }
+  throw new Error('not_encrypted')
+}
+
+function runDecrypt(
+  senderId: string,
+  senderDeviceId: number,
+  entry: Recipient,
+): Promise<string> {
+  return withSessionLock(`${senderId}:${senderDeviceId}`, async () => {
+    const cipher = new SessionCipher(signalStore, addressFor(senderId, senderDeviceId))
+    const body = b642ab(entry.b)
+    const plain =
+      entry.t === 3
+        ? await cipher.decryptPreKeyWhisperMessage(body)
+        : await cipher.decryptWhisperMessage(body)
+    return ab2utf8(plain)
+  })
 }
 
 /**
@@ -147,10 +273,14 @@ async function _decryptFromUser(userId: string, text: string): Promise<string> {
  * Signal envelope, decrypts it otherwise. Errors fall back to a placeholder so
  * the UI still renders something rather than throwing.
  */
-export async function maybeDecrypt(senderId: string, text: string): Promise<string> {
+export async function maybeDecrypt(
+  myId: string,
+  senderId: string,
+  text: string,
+): Promise<string> {
   if (!isEncryptedEnvelope(text)) return text
   try {
-    return await decryptFromUser(senderId, text)
+    return await decryptFromUser(myId, senderId, text)
   } catch (err) {
     console.warn('decrypt failed', err)
     return ''

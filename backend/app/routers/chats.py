@@ -24,14 +24,21 @@ router = APIRouter(prefix="/chats", tags=["chats"])
 
 def _msg_out(m: Message) -> MessageOut:
     text_value = "" if m.deleted_at else m.text
+    sealed = bool(getattr(m, "sealed", False))
+    # Sealed messages: the server still records the real author privately for
+    # permission checks (edit/delete), but every public surface — REST and
+    # WebSocket — sees an empty authorId. Clients re-derive the sender from
+    # the chat membership and verify identity via the inner Signal envelope.
+    public_author = "" if sealed else m.author_id
     return MessageOut(
         id=m.id,
-        authorId=m.author_id,
+        authorId=public_author,
         text=text_value,
         at=m.created_at,
         editedAt=m.edited_at,
         deletedAt=m.deleted_at,
         replyToId=m.reply_to_id,
+        sealed=sealed,
     )
 
 
@@ -197,7 +204,17 @@ async def post_message(
         ref = db.get(Message, body.replyToId)
         if ref and ref.chat_id == chat.id:
             reply_to_id = ref.id
-    msg = Message(chat_id=chat.id, author_id=me.id, text=body.text, reply_to_id=reply_to_id)
+    # Sealed-sender is only meaningful in DM where the recipient can infer the
+    # sender from chat membership. Reject it elsewhere so callers don't end up
+    # with a permanently-anonymous group/channel post.
+    sealed = bool(body.sealed) and chat.kind == "dm"
+    msg = Message(
+        chat_id=chat.id,
+        author_id=me.id,
+        text=body.text,
+        reply_to_id=reply_to_id,
+        sealed=sealed,
+    )
     chat.updated_at = msg.created_at or now_ms()
     db.add(msg)
     db.add(chat)
@@ -225,6 +242,13 @@ async def edit_message(
     if msg.author_id != me.id:
         raise HTTPException(status_code=403, detail="Cannot edit others' messages")
     msg.text = body.text
+    if body.sealed is not None:
+        # Sealed flag may toggle if the new ciphertext is sealed but the old
+        # one wasn't (or vice versa); only honour it for DM chats where the
+        # convention applies.
+        chat = db.get(Chat, chat_id)
+        if chat and chat.kind == "dm":
+            msg.sealed = bool(body.sealed)
     msg.edited_at = now_ms()
     db.commit()
     db.refresh(msg)

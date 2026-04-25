@@ -84,6 +84,12 @@ class Message(Base):
     reply_to_id: Mapped[str | None] = mapped_column(
         String, ForeignKey("messages.id", ondelete="SET NULL"), nullable=True, default=None
     )
+    # Sealed-sender flag: when true, API responses and WebSocket broadcasts
+    # strip `author_id` so other clients (and any third party reading the
+    # protocol stream) cannot see who sent the message; the recipient infers
+    # the sender from chat context (DM has only two participants) and the
+    # Signal PreKey envelope carries the verified sender identity key.
+    sealed: Mapped[bool] = mapped_column(Boolean, default=False)
 
     chat: Mapped[Chat] = relationship(back_populates="messages")
 
@@ -202,10 +208,11 @@ class ChatFolderMember(Base):
 
 
 class UserKeys(Base):
-    """Public Signal-protocol key bundle for a user.
+    """Public Signal-protocol key bundle for a single (user, device) pair.
 
     Private keys never leave the client; only public/signed values are stored here.
-    Encoded as base64-url strings.
+    Encoded as base64-url strings. A single user may have multiple device rows
+    (phone + laptop + desktop, etc.), each with its own identity key.
     """
 
     __tablename__ = "user_keys"
@@ -213,6 +220,7 @@ class UserKeys(Base):
     user_id: Mapped[str] = mapped_column(
         String, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
     )
+    device_id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
     registration_id: Mapped[int] = mapped_column(Integer)
     identity_key: Mapped[str] = mapped_column(Text)
     signed_pre_key_id: Mapped[int] = mapped_column(Integer)
@@ -222,15 +230,19 @@ class UserKeys(Base):
 
 
 class OneTimePreKey(Base):
-    """Pool of one-time prekeys; consumed atomically when a peer fetches a bundle."""
+    """Pool of one-time prekeys; consumed atomically when a peer fetches a bundle.
+
+    Each device of a user maintains its own pool of OTPs.
+    """
 
     __tablename__ = "one_time_prekeys"
-    __table_args__ = (UniqueConstraint("user_id", "key_id"),)
+    __table_args__ = (UniqueConstraint("user_id", "device_id", "key_id"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[str] = mapped_column(
         String, ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
+    device_id: Mapped[int] = mapped_column(Integer, default=1, index=True)
     key_id: Mapped[int] = mapped_column(Integer)
     public_key: Mapped[str] = mapped_column(Text)
     consumed: Mapped[bool] = mapped_column(Boolean, default=False, index=True)

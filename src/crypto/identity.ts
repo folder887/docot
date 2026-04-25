@@ -61,10 +61,12 @@ function publicSigned(spk: SignedPreKeyPairType): {
 
 /**
  * Ensure the local device has an identity, signed prekey and OTP pool, and
- * that the backend has up-to-date public bundles. Idempotent and cheap to call
- * after login.
+ * that the backend has up-to-date public bundles for THIS device. Idempotent
+ * and cheap to call after login. Returns the deviceId in use.
  */
-export async function ensureIdentity(): Promise<void> {
+export async function ensureIdentity(): Promise<number> {
+  const deviceId = await signalStore.getOrCreateDeviceId()
+
   let kp = await signalStore.getIdentityKeyPair()
   let regId = await signalStore.getLocalRegistrationId()
 
@@ -89,9 +91,9 @@ export async function ensureIdentity(): Promise<void> {
   // Check server status; (re)upload bundle if missing or OTPs are running low.
   let status: { hasBundle: boolean; oneTimeRemaining: number }
   try {
-    status = await api.keysStatus()
+    status = await api.keysStatus(deviceId)
   } catch {
-    return // network blip — try again later
+    return deviceId // network blip — try again later
   }
 
   if (!status.hasBundle || needsServerUpload) {
@@ -104,6 +106,7 @@ export async function ensureIdentity(): Promise<void> {
     }
     const otps = await generateOneTime(INITIAL_OTP_COUNT)
     await api.uploadBundle({
+      deviceId,
       registrationId: regId,
       identityKey: ab2b64(kp.pubKey),
       signedPreKeyId: SIGNED_PRE_KEY_ID,
@@ -111,13 +114,19 @@ export async function ensureIdentity(): Promise<void> {
       signedPreKeySignature: ab2b64(signature),
       oneTimePreKeys: publicOneTime(otps),
     })
-    return
+    return deviceId
   }
 
   if (status.oneTimeRemaining < OTP_REFILL_THRESHOLD) {
     const otps = await generateOneTime(OTP_REFILL_BATCH)
-    await api.replenishOneTime({ keys: publicOneTime(otps) })
+    await api.replenishOneTime({ deviceId, keys: publicOneTime(otps) })
   }
+  return deviceId
+}
+
+/** Current device's id; falls back to creating one if missing. */
+export function localDeviceId(): Promise<number> {
+  return signalStore.getOrCreateDeviceId()
 }
 
 export const _signedTest = publicSigned // keeps the helper exported for tests
