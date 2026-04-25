@@ -7,14 +7,32 @@ from sqlalchemy.orm import Session
 from ..auth import current_user, user_from_token
 from ..db import SessionLocal, get_db
 from ..models import Chat, ChatMember, Message, User, now_ms
-from ..schemas import ChatCreateIn, ChatOut, MessageIn, MessageOut
+from ..schemas import (
+    ChatCreateIn,
+    ChatMemberOut,
+    ChatMemberPatch,
+    ChatOut,
+    ChatPatch,
+    MessageIn,
+    MessageOut,
+    MessagePatch,
+)
 from ..ws import hub
 
 router = APIRouter(prefix="/chats", tags=["chats"])
 
 
 def _msg_out(m: Message) -> MessageOut:
-    return MessageOut(id=m.id, authorId=m.author_id, text=m.text, at=m.created_at)
+    text_value = "" if m.deleted_at else m.text
+    return MessageOut(
+        id=m.id,
+        authorId=m.author_id,
+        text=text_value,
+        at=m.created_at,
+        editedAt=m.edited_at,
+        deletedAt=m.deleted_at,
+        replyToId=m.reply_to_id,
+    )
 
 
 def _chat_out(db: Session, chat: Chat, me_id: str, with_history: bool = False) -> ChatOut:
@@ -47,9 +65,13 @@ def _chat_out(db: Session, chat: Chat, me_id: str, with_history: bool = False) -
         id=chat.id,
         kind=chat.kind,
         title=title or "Chat",
+        description=getattr(chat, "description", "") or "",
+        isPublic=bool(getattr(chat, "is_public", False)),
+        createdBy=chat.created_by,
         participants=members,
         pinned=bool(membership and membership.pinned),
         muted=bool(membership and membership.muted),
+        role=membership.role if membership else "member",
         updatedAt=chat.updated_at,
         lastMessage=_msg_out(last) if last else None,
         messages=msgs,
@@ -93,7 +115,13 @@ def create_chat(
             if member_ids == set(participant_ids):
                 return _chat_out(db, c, me.id, with_history=True)
 
-    chat = Chat(kind=body.kind, title=body.title or "", created_by=me.id)
+    chat = Chat(
+        kind=body.kind,
+        title=body.title or "",
+        description=body.description or "",
+        is_public=bool(body.isPublic) if body.isPublic is not None else False,
+        created_by=me.id,
+    )
     db.add(chat)
     db.flush()
     for pid in participant_ids:
@@ -156,7 +184,20 @@ async def post_message(
     db: Session = Depends(get_db),
 ) -> MessageOut:
     chat = _require_member(db, chat_id, me.id)
-    msg = Message(chat_id=chat.id, author_id=me.id, text=body.text)
+    if chat.kind == "channel":
+        mem = (
+            db.query(ChatMember)
+            .filter(ChatMember.chat_id == chat.id, ChatMember.user_id == me.id)
+            .first()
+        )
+        if not mem or mem.role not in ("owner", "admin"):
+            raise HTTPException(status_code=403, detail="Only admins can post in channels")
+    reply_to_id = None
+    if body.replyToId:
+        ref = db.get(Message, body.replyToId)
+        if ref and ref.chat_id == chat.id:
+            reply_to_id = ref.id
+    msg = Message(chat_id=chat.id, author_id=me.id, text=body.text, reply_to_id=reply_to_id)
     chat.updated_at = msg.created_at or now_ms()
     db.add(msg)
     db.add(chat)
@@ -165,6 +206,166 @@ async def post_message(
     payload = {"type": "message", "chatId": chat.id, "message": _msg_out(msg).model_dump()}
     await hub.broadcast(chat.id, payload)
     return _msg_out(msg)
+
+
+@router.patch("/{chat_id}/messages/{message_id}", response_model=MessageOut)
+async def edit_message(
+    chat_id: str,
+    message_id: str,
+    body: MessagePatch,
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> MessageOut:
+    _require_member(db, chat_id, me.id)
+    msg = db.get(Message, message_id)
+    if not msg or msg.chat_id != chat_id:
+        raise HTTPException(status_code=404, detail="Message not found")
+    if msg.deleted_at:
+        raise HTTPException(status_code=410, detail="Message deleted")
+    if msg.author_id != me.id:
+        raise HTTPException(status_code=403, detail="Cannot edit others' messages")
+    msg.text = body.text
+    msg.edited_at = now_ms()
+    db.commit()
+    db.refresh(msg)
+    payload = {"type": "message_edited", "chatId": chat_id, "message": _msg_out(msg).model_dump()}
+    await hub.broadcast(chat_id, payload)
+    return _msg_out(msg)
+
+
+@router.delete("/{chat_id}/messages/{message_id}")
+async def delete_message(
+    chat_id: str,
+    message_id: str,
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    _require_member(db, chat_id, me.id)
+    msg = db.get(Message, message_id)
+    if not msg or msg.chat_id != chat_id:
+        raise HTTPException(status_code=404, detail="Message not found")
+    mem = (
+        db.query(ChatMember)
+        .filter(ChatMember.chat_id == chat_id, ChatMember.user_id == me.id)
+        .first()
+    )
+    is_admin = bool(mem and mem.role in ("owner", "admin"))
+    if msg.author_id != me.id and not is_admin:
+        raise HTTPException(status_code=403, detail="Cannot delete others' messages")
+    if msg.deleted_at:
+        return {"ok": True, "id": message_id}
+    msg.deleted_at = now_ms()
+    msg.text = ""
+    db.commit()
+    payload = {
+        "type": "message_deleted",
+        "chatId": chat_id,
+        "messageId": message_id,
+        "deletedAt": msg.deleted_at,
+    }
+    await hub.broadcast(chat_id, payload)
+    return {"ok": True, "id": message_id}
+
+
+@router.patch("/{chat_id}", response_model=ChatOut)
+def update_chat(
+    chat_id: str,
+    body: ChatPatch,
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> ChatOut:
+    chat = _require_member(db, chat_id, me.id)
+    mem = (
+        db.query(ChatMember)
+        .filter(ChatMember.chat_id == chat.id, ChatMember.user_id == me.id)
+        .first()
+    )
+    if not mem or mem.role not in ("owner", "admin"):
+        raise HTTPException(status_code=403, detail="Admin only")
+    if chat.kind == "dm":
+        raise HTTPException(status_code=400, detail="Cannot edit DM")
+    if body.title is not None:
+        chat.title = body.title.strip()[:120]
+    if body.description is not None:
+        chat.description = body.description[:1000]
+    if body.isPublic is not None:
+        chat.is_public = bool(body.isPublic)
+    chat.updated_at = now_ms()
+    db.commit()
+    db.refresh(chat)
+    return _chat_out(db, chat, me.id)
+
+
+@router.get("/{chat_id}/members", response_model=list[ChatMemberOut])
+def list_members(
+    chat_id: str,
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> list[ChatMemberOut]:
+    _require_member(db, chat_id, me.id)
+    rows = db.query(ChatMember).filter(ChatMember.chat_id == chat_id).all()
+    return [
+        ChatMemberOut(userId=r.user_id, role=r.role, joinedAt=r.joined_at) for r in rows
+    ]
+
+
+@router.patch("/{chat_id}/members/{user_id}", response_model=ChatMemberOut)
+def patch_member(
+    chat_id: str,
+    user_id: str,
+    body: ChatMemberPatch,
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> ChatMemberOut:
+    chat = _require_member(db, chat_id, me.id)
+    my_mem = (
+        db.query(ChatMember)
+        .filter(ChatMember.chat_id == chat.id, ChatMember.user_id == me.id)
+        .first()
+    )
+    if not my_mem or my_mem.role != "owner":
+        raise HTTPException(status_code=403, detail="Owner only")
+    target = (
+        db.query(ChatMember)
+        .filter(ChatMember.chat_id == chat.id, ChatMember.user_id == user_id)
+        .first()
+    )
+    if not target:
+        raise HTTPException(status_code=404, detail="Member not found")
+    if body.role == "owner":
+        my_mem.role = "admin"
+    target.role = body.role
+    db.commit()
+    return ChatMemberOut(userId=target.user_id, role=target.role, joinedAt=target.joined_at)
+
+
+@router.delete("/{chat_id}/members/{user_id}")
+def remove_member(
+    chat_id: str,
+    user_id: str,
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    chat = _require_member(db, chat_id, me.id)
+    my_mem = (
+        db.query(ChatMember)
+        .filter(ChatMember.chat_id == chat.id, ChatMember.user_id == me.id)
+        .first()
+    )
+    if user_id != me.id and (not my_mem or my_mem.role not in ("owner", "admin")):
+        raise HTTPException(status_code=403, detail="Admin only")
+    target = (
+        db.query(ChatMember)
+        .filter(ChatMember.chat_id == chat.id, ChatMember.user_id == user_id)
+        .first()
+    )
+    if not target:
+        raise HTTPException(status_code=404, detail="Member not found")
+    if target.role == "owner" and target.user_id != me.id:
+        raise HTTPException(status_code=403, detail="Cannot remove owner")
+    db.delete(target)
+    db.commit()
+    return {"ok": True}
 
 
 @router.post("/{chat_id}/pin")

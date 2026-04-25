@@ -33,16 +33,25 @@ export type Message = {
   authorId: string
   text: string
   at: number
+  editedAt?: number | null
+  deletedAt?: number | null
+  replyToId?: string | null
 }
+
+export type ChatRole = 'owner' | 'admin' | 'member'
 
 export type Chat = {
   id: string
   title: string
   kind: 'dm' | 'group' | 'channel' | 'saved'
+  description?: string
+  isPublic?: boolean
+  createdBy?: string
   participants: string[]
   messages: Message[]
   pinned?: boolean
   muted?: boolean
+  role?: ChatRole
   updatedAt?: number
   lastMessage?: Message | null
 }
@@ -65,6 +74,14 @@ export type Note = {
   createdAt: number
 }
 
+export type PostMediaItem = {
+  url: string
+  kind: 'image' | 'video' | 'audio' | 'file'
+  name: string
+  mime: string
+  size: number
+}
+
 export type NewsPost = {
   id: string
   authorId: string
@@ -75,6 +92,7 @@ export type NewsPost = {
   replies: number
   liked?: boolean
   reposted?: boolean
+  media?: PostMediaItem[]
 }
 
 export type ChatFolder = {

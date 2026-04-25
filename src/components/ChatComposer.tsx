@@ -18,6 +18,13 @@ import { useApp } from '../store'
 
 type Props = {
   onSend: (text: string) => void
+  /** When set, composer is in edit mode for an existing message. */
+  editing?: { id: string; text: string } | null
+  onSubmitEdit?: (id: string, text: string) => void
+  onCancelEdit?: () => void
+  /** Optional reply context displayed above the composer. */
+  replyTo?: { id: string; preview: string; author?: string } | null
+  onCancelReply?: () => void
 }
 
 const MARKERS: Record<string, string> = {
@@ -45,9 +52,22 @@ function fmt(s: number): string {
   return `${m}:${ss.toString().padStart(2, '0')}`
 }
 
-export function ChatComposer({ onSend }: Props) {
+export function ChatComposer({
+  onSend,
+  editing,
+  onSubmitEdit,
+  onCancelEdit,
+  replyTo,
+  onCancelReply,
+}: Props) {
   const { state } = useApp()
   const [text, setText] = useState('')
+
+  useEffect(() => {
+    if (!editing) return
+    const t = editing.text
+    queueMicrotask(() => setText(t))
+  }, [editing])
   const [hasSelection, setHasSelection] = useState(false)
   const [recState, setRecState] = useState<'idle' | 'recording' | 'sending'>('idle')
   const [recSeconds, setRecSeconds] = useState(0)
@@ -87,6 +107,11 @@ export function ChatComposer({ onSend }: Props) {
     e.preventDefault()
     const v = text.trim()
     if (!v) return
+    if (editing && onSubmitEdit) {
+      onSubmitEdit(editing.id, v)
+      setText('')
+      return
+    }
     setText('')
     onSend(v)
   }
@@ -219,6 +244,32 @@ export function ChatComposer({ onSend }: Props) {
 
   return (
     <div className="border-t-2 border-ink bg-paper">
+      {(replyTo || editing) && (
+        <div className="flex items-start gap-2 border-b border-ink/15 px-3 py-2 text-xs">
+          <span className="font-black uppercase tracking-wide">
+            {editing ? t('msg.edit', state.lang) : t('msg.replyingTo', state.lang)}
+            {replyTo?.author && !editing ? ` ${replyTo.author}` : ''}
+          </span>
+          <span className="min-w-0 flex-1 truncate text-muted">
+            {editing ? editing.text : replyTo?.preview}
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              if (editing) {
+                onCancelEdit?.()
+                setText('')
+              } else {
+                onCancelReply?.()
+              }
+            }}
+            className="text-muted hover:text-ink"
+            aria-label="cancel"
+          >
+            ×
+          </button>
+        </div>
+      )}
       {hasSelection && (
         <div className="flex items-center gap-1 border-b border-ink/15 px-2 py-1">
           {(['bold', 'italic', 'strike', 'code'] as const).map((k) => {

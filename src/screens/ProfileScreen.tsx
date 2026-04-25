@@ -5,6 +5,7 @@ import { relTime, t } from '../i18n'
 import { ScreenHeader } from '../components/ScreenHeader'
 import { Avatar } from '../components/Avatar'
 import { Modal, ConfirmDialog } from '../components/Modal'
+import { QRCode } from '../components/QRCode'
 import { api } from '../api'
 import type { User } from '../types'
 import {
@@ -283,7 +284,7 @@ export function ProfileScreen() {
       {/* QR modal */}
       <Modal open={showQR} onClose={() => setShowQR(false)} title={`@${user.handle ?? user.id}`}>
         <div className="flex flex-col items-center gap-3">
-          <QRCode text={`https://docot.app/u/${user.handle ?? user.id}`} size={220} />
+          <QRCode text={`${window.location.origin}/u/${user.handle ?? user.id}`} size={220} />
           <p className="text-center text-xs text-muted">
             {state.lang === 'ru' ? 'Поделись ником через QR' : 'Share this user via QR'}
           </p>
@@ -390,82 +391,7 @@ function InfoRow({
   )
 }
 
-/* ---------------- Inline QR generator (no external deps) ---------------- */
-function QRCode({ text, size = 200 }: { text: string; size?: number }) {
-  const matrix = useMemo(() => buildQR(text), [text])
-  const n = matrix.length
-  const cell = size / n
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox={`0 0 ${size} ${size}`}
-      className="rounded-xl"
-      style={{ background: 'var(--paper)' }}
-    >
-      <rect width={size} height={size} fill="var(--paper)" />
-      {matrix.map((row, y) =>
-        row.map((bit, x) =>
-          bit ? (
-            <rect
-              key={`${x}-${y}`}
-              x={x * cell}
-              y={y * cell}
-              width={cell}
-              height={cell}
-              fill="var(--ink)"
-            />
-          ) : null,
-        ),
-      )}
-    </svg>
-  )
-}
 
-/**
- * Tiny QR-like code generator. Not a full ISO QR — produces a unique,
- * deterministic black/white grid that visually looks like a QR code.
- * Good enough for UI placeholder; users scan handle (which is shown in plaintext above).
- */
-function buildQR(text: string): boolean[][] {
-  const N = 25
-  const grid: boolean[][] = Array.from({ length: N }, () => Array(N).fill(false))
-  // Simple xorshift seeded by text
-  let h = 2166136261
-  for (let i = 0; i < text.length; i++) {
-    h ^= text.charCodeAt(i)
-    h = (h * 16777619) >>> 0
-  }
-  const rand = () => {
-    h ^= h << 13
-    h ^= h >>> 17
-    h ^= h << 5
-    h >>>= 0
-    return h / 0xffffffff
-  }
-  // Fill data area (avoid finder corners)
-  for (let y = 0; y < N; y++) {
-    for (let x = 0; x < N; x++) {
-      grid[y][x] = rand() > 0.5
-    }
-  }
-  // Three finder squares (TL / TR / BL)
-  const drawFinder = (cx: number, cy: number) => {
-    for (let dy = -3; dy <= 3; dy++) {
-      for (let dx = -3; dx <= 3; dx++) {
-        const x = cx + dx
-        const y = cy + dy
-        if (x < 0 || y < 0 || x >= N || y >= N) continue
-        const a = Math.max(Math.abs(dx), Math.abs(dy))
-        grid[y][x] = a !== 2 // border + center, gap at ring 2
-      }
-    }
-  }
-  drawFinder(3, 3)
-  drawFinder(N - 4, 3)
-  drawFinder(3, N - 4)
-  return grid
-}
 
 /* ---------------- Call screen (in-app overlay, replaces window.alert) ---------------- */
 function CallScreen({

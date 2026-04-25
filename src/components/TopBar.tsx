@@ -7,7 +7,7 @@ export function TopBar({ onSearch }: { onSearch?: () => void }) {
   const showLogo = ['/chats', '/calendar', '/notes', '/news', '/menu'].includes(pathname)
   if (!showLogo) return null
   return (
-    <header className="sticky top-0 z-10 flex items-center justify-between border-b-2 border-black bg-white px-4 py-3">
+    <header className="topbar-mobile sticky top-0 z-10 flex items-center justify-between border-b-2 border-black bg-white px-4 py-3">
       <Link to="/chats" className="flex items-center">
         <LogoWithWord size={28} />
       </Link>
