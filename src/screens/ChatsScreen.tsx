@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useApp } from '../store'
 import { relTime, t } from '../i18n'
 import { Avatar } from '../components/Avatar'
-import { IconChat, IconChannel, IconFolder, IconPin, IconPlus, IconUser } from '../components/Icons'
+import { IconChannel, IconFolder, IconPin, IconPlus, IconUser } from '../components/Icons'
 import { Modal, PromptDialog, ConfirmDialog } from '../components/Modal'
 import type { Chat, ChatFolder as ChatFolderT, User } from '../types'
 import { decodeMedia } from '../messageMedia'
@@ -35,10 +35,8 @@ export function ChatsScreen() {
   const [folder, setFolder] = useState('all')
   const [query, setQuery] = useState('')
   const [plusOpen, setPlusOpen] = useState(false)
-  const [newChatOpen, setNewChatOpen] = useState(false)
   const [newGroupOpen, setNewGroupOpen] = useState(false)
   const [newGroupKind, setNewGroupKind] = useState<'group' | 'channel'>('group')
-  const [newBotOpen, setNewBotOpen] = useState(false)
   const [foldersOpen, setFoldersOpen] = useState(false)
   const [globalResults, setGlobalResults] = useState<User[]>([])
   const [searching, setSearching] = useState(false)
@@ -116,11 +114,6 @@ export function ChatsScreen() {
               onClose={() => setPlusOpen(false)}
               items={[
                 {
-                  label: t('chats.newChat', state.lang),
-                  icon: <IconChat size={18} />,
-                  onClick: () => setNewChatOpen(true),
-                },
-                {
                   label: t('chats.newGroup', state.lang),
                   icon: <IconUser size={18} />,
                   onClick: () => {
@@ -135,11 +128,6 @@ export function ChatsScreen() {
                     setNewGroupKind('channel')
                     setNewGroupOpen(true)
                   },
-                },
-                {
-                  label: t('chats.newBot', state.lang),
-                  icon: <IconChat size={18} />,
-                  onClick: () => setNewBotOpen(true),
                 },
                 {
                   label: t('settings.folders', state.lang),
@@ -206,32 +194,11 @@ export function ChatsScreen() {
         </ul>
       )}
 
-      {newChatOpen && (
-        <NewChatSheet
-          onClose={() => setNewChatOpen(false)}
-          onPick={async (u) => {
-            setNewChatOpen(false)
-            await onPickUser(u)
-          }}
-        />
-      )}
       {newGroupOpen && (
         <NewGroupSheet
           kind={newGroupKind}
           onClose={() => setNewGroupOpen(false)}
         />
-      )}
-      {newBotOpen && (
-        <Modal open={newBotOpen} onClose={() => setNewBotOpen(false)} title={t('chats.newBot', state.lang)}>
-          <p className="text-sm text-muted">
-            {state.lang === 'ru'
-              ? 'Создание собственных ботов появится в следующем апдейте. Сейчас вы можете найти существующих ботов через глобальный поиск.'
-              : 'Custom bot creation lands in the next update. For now, find existing bots via global search.'}
-          </p>
-          <button className="bw-btn-primary mt-4" onClick={() => setNewBotOpen(false)}>
-            {t('common.close', state.lang)}
-          </button>
-        </Modal>
       )}
       {foldersOpen && <FoldersSheet onClose={() => setFoldersOpen(false)} />}
     </div>
@@ -333,67 +300,6 @@ function GlobalSearchResults({
           </button>
         ))}
     </div>
-  )
-}
-
-function NewChatSheet({
-  onClose,
-  onPick,
-}: {
-  onClose: () => void
-  onPick: (u: User) => void
-}) {
-  const { state, searchUsers } = useApp()
-  const [q, setQ] = useState('')
-  const [results, setResults] = useState<User[]>([])
-  const [busy, setBusy] = useState(false)
-
-  useEffect(() => {
-    if (q.trim().length < 1) {
-      const reset = window.setTimeout(() => setResults([]), 0)
-      return () => window.clearTimeout(reset)
-    }
-    const handle = window.setTimeout(() => {
-      setBusy(true)
-      searchUsers(q)
-        .then((list) => setResults(list.filter((u) => u.id !== state.me?.id)))
-        .finally(() => setBusy(false))
-    }, 200)
-    return () => window.clearTimeout(handle)
-  }, [q, searchUsers, state.me?.id])
-
-  return (
-    <Modal open onClose={onClose} title={t('common.newChat', state.lang)}>
-      <input
-        autoFocus
-        className="bw-input w-full text-sm normal-case"
-        placeholder={t('chats.findUser', state.lang)}
-        value={q}
-        onChange={(e) => setQ(e.target.value)}
-      />
-      <div className="mt-3 max-h-[50vh] overflow-y-auto">
-        {busy && <div className="py-3 text-center text-xs text-muted">{t('common.loading', state.lang)}</div>}
-        {!busy && q && results.length === 0 && (
-          <div className="py-3 text-center text-xs text-muted">{t('chats.noResults', state.lang)}</div>
-        )}
-        {results.map((u) => (
-          <button
-            key={u.id}
-            onClick={() => onPick(u)}
-            className="row-press flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left"
-          >
-            <Avatar name={u.name} size={44} />
-            <div className="min-w-0 flex-1">
-              <div className="truncate font-bold">{u.name}</div>
-              <div className="truncate text-xs text-muted">@{u.handle}</div>
-            </div>
-            <span className="rounded-full border-2 border-ink px-3 py-1 text-xs font-bold">
-              {t('chats.start', state.lang)}
-            </span>
-          </button>
-        ))}
-      </div>
-    </Modal>
   )
 }
 
