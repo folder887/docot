@@ -22,16 +22,28 @@ from ..ws import hub
 router = APIRouter(prefix="/chats", tags=["chats"])
 
 
-def _msg_out(m: Message) -> MessageOut:
+def _msg_out(m: Message, viewer_id: str | None = None) -> MessageOut:
     text_value = "" if m.deleted_at else m.text
+    sealed = bool(getattr(m, "sealed", False))
+    # Sealed messages: the server still records the real author privately for
+    # permission checks (edit/delete) and every other observer (anonymous
+    # API access, WebSocket broadcast, server logs) sees an empty authorId.
+    # The author themselves still sees their own id back so that client UIs
+    # (history, last-message preview, reload) can attribute their own messages
+    # without resorting to fragile heuristics.
+    if sealed and viewer_id != m.author_id:
+        public_author = ""
+    else:
+        public_author = m.author_id
     return MessageOut(
         id=m.id,
-        authorId=m.author_id,
+        authorId=public_author,
         text=text_value,
         at=m.created_at,
         editedAt=m.edited_at,
         deletedAt=m.deleted_at,
         replyToId=m.reply_to_id,
+        sealed=sealed,
     )
 
 
@@ -53,7 +65,7 @@ def _chat_out(db: Session, chat: Chat, me_id: str, with_history: bool = False) -
             .limit(500)
             .all()
         )
-        msgs = [_msg_out(m) for m in rows]
+        msgs = [_msg_out(m, viewer_id=me_id) for m in rows]
 
     title = chat.title
     if chat.kind == "dm" and not title:
@@ -73,7 +85,7 @@ def _chat_out(db: Session, chat: Chat, me_id: str, with_history: bool = False) -
         muted=bool(membership and membership.muted),
         role=membership.role if membership else "member",
         updatedAt=chat.updated_at,
-        lastMessage=_msg_out(last) if last else None,
+        lastMessage=_msg_out(last, viewer_id=me_id) if last else None,
         messages=msgs,
     )
 
@@ -173,7 +185,7 @@ def list_messages(
         q = q.filter(Message.created_at < before)
     rows = q.order_by(Message.created_at.desc()).limit(max(1, min(limit, 500))).all()
     rows.reverse()
-    return [_msg_out(m) for m in rows]
+    return [_msg_out(m, viewer_id=me.id) for m in rows]
 
 
 @router.post("/{chat_id}/messages", response_model=MessageOut)
@@ -197,15 +209,27 @@ async def post_message(
         ref = db.get(Message, body.replyToId)
         if ref and ref.chat_id == chat.id:
             reply_to_id = ref.id
-    msg = Message(chat_id=chat.id, author_id=me.id, text=body.text, reply_to_id=reply_to_id)
+    # Sealed-sender is only meaningful in DM where the recipient can infer the
+    # sender from chat membership. Reject it elsewhere so callers don't end up
+    # with a permanently-anonymous group/channel post.
+    sealed = bool(body.sealed) and chat.kind == "dm"
+    msg = Message(
+        chat_id=chat.id,
+        author_id=me.id,
+        text=body.text,
+        reply_to_id=reply_to_id,
+        sealed=sealed,
+    )
     chat.updated_at = msg.created_at or now_ms()
     db.add(msg)
     db.add(chat)
     db.commit()
     db.refresh(msg)
+    # WebSocket broadcasts use the anonymous projection; the response goes
+    # back to the author themselves and therefore exposes the real authorId.
     payload = {"type": "message", "chatId": chat.id, "message": _msg_out(msg).model_dump()}
     await hub.broadcast(chat.id, payload)
-    return _msg_out(msg)
+    return _msg_out(msg, viewer_id=me.id)
 
 
 @router.patch("/{chat_id}/messages/{message_id}", response_model=MessageOut)
@@ -225,12 +249,19 @@ async def edit_message(
     if msg.author_id != me.id:
         raise HTTPException(status_code=403, detail="Cannot edit others' messages")
     msg.text = body.text
+    if body.sealed is not None:
+        # Sealed flag may toggle if the new ciphertext is sealed but the old
+        # one wasn't (or vice versa); only honour it for DM chats where the
+        # convention applies.
+        chat = db.get(Chat, chat_id)
+        if chat and chat.kind == "dm":
+            msg.sealed = bool(body.sealed)
     msg.edited_at = now_ms()
     db.commit()
     db.refresh(msg)
     payload = {"type": "message_edited", "chatId": chat_id, "message": _msg_out(msg).model_dump()}
     await hub.broadcast(chat_id, payload)
-    return _msg_out(msg)
+    return _msg_out(msg, viewer_id=me.id)
 
 
 @router.delete("/{chat_id}/messages/{message_id}")

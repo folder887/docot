@@ -7,7 +7,6 @@ import { ConfirmDialog } from '../components/Modal'
 import {
   IconHeart,
   IconRepeat,
-  IconReply,
   IconImage,
   IconMic,
   IconPaperclip,
@@ -171,12 +170,6 @@ export function NewsScreen() {
             >
               <IconMic size={18} />
             </IconBtn>
-            <IconBtn
-              onClick={() => fileInput.current?.click()}
-              title="Attach"
-            >
-              <IconPaperclip size={18} />
-            </IconBtn>
             <span className="flex-1" />
             <button
               type="submit"
@@ -248,8 +241,7 @@ export function NewsScreen() {
                       ))}
                     </div>
                   )}
-                  <div className="mt-3 flex items-center justify-between pr-4 text-muted">
-                    <ActionBtn icon={<IconReply size={18} />} count={p.replies} onClick={() => {}} />
+                  <div className="mt-3 flex items-center gap-6 text-muted">
                     <ActionBtn
                       icon={<IconRepeat size={18} />}
                       count={p.reposts}

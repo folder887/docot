@@ -17,6 +17,7 @@
     "tauri:dmg": "tauri build --bundles dmg"
   },
   "dependencies": {
+    "@privacyresearch/libsignal-protocol-typescript": "^0.0.16",
     "@tauri-apps/api": "^2.10.1",
     "jsqr": "^1.4.0",
     "qrcode": "^1.5.4",

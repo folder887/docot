@@ -63,6 +63,9 @@ export type ApiMessage = {
   editedAt?: number | null
   deletedAt?: number | null
   replyToId?: string | null
+  /** Sealed-sender messages have an empty `authorId`; clients fall back to the
+   * other DM participant and verify identity via the inner Signal envelope. */
+  sealed?: boolean
 }
 
 export type ApiChat = {
@@ -202,15 +205,28 @@ export const api = {
       method: 'PATCH',
       body: JSON.stringify(patch),
     }),
-  sendMessage: (chatId: string, body: { text: string; replyToId?: string | null }) =>
+  sendMessage: (
+    chatId: string,
+    body: { text: string; replyToId?: string | null; sealed?: boolean },
+  ) =>
     request<ApiMessage>(`/chats/${encodeURIComponent(chatId)}/messages`, {
       method: 'POST',
       body: JSON.stringify(body),
     }),
-  editMessage: (chatId: string, messageId: string, text: string) =>
+  editMessage: (
+    chatId: string,
+    messageId: string,
+    text: string,
+    sealed?: boolean,
+  ) =>
     request<ApiMessage>(
       `/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(messageId)}`,
-      { method: 'PATCH', body: JSON.stringify({ text }) },
+      {
+        method: 'PATCH',
+        body: JSON.stringify(
+          sealed === undefined ? { text } : { text, sealed },
+        ),
+      },
     ),
   deleteMessage: (chatId: string, messageId: string) =>
     request<{ ok: boolean; id: string }>(
@@ -313,6 +329,21 @@ export const api = {
   deleteFolder: (id: string) =>
     request<{ ok: boolean }>(`/folders/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
+  // E2E key bundles
+  uploadBundle: (body: ApiKeyBundleIn) =>
+    request<ApiKeyStatus>('/keys/bundle', { method: 'POST', body: JSON.stringify(body) }),
+  replenishOneTime: (body: ApiOneTimePreKeysIn) =>
+    request<ApiKeyStatus>('/keys/onetime', { method: 'POST', body: JSON.stringify(body) }),
+  keysStatus: (deviceId: number) =>
+    request<ApiKeyStatus>(`/keys/status?deviceId=${deviceId}`),
+  /** All known device bundles for a user; senders fan out one envelope per device. */
+  listUserDevices: (userId: string) =>
+    request<ApiDeviceList>(`/keys/devices/${encodeURIComponent(userId)}`),
+  getKeyBundleForDevice: (userId: string, deviceId: number) =>
+    request<ApiKeyBundle>(
+      `/keys/bundle/${encodeURIComponent(userId)}/${deviceId}`,
+    ),
+
   // uploads
   uploadFile: async (file: Blob, filename = 'file'): Promise<ApiUpload> => {
     const fd = new FormData()
@@ -324,6 +355,45 @@ export const api = {
     if (!res.ok) throw new ApiError(res.status, res.statusText)
     return (await res.json()) as ApiUpload
   },
+}
+
+export type ApiOneTimePreKey = { keyId: number; publicKey: string }
+export type ApiKeyBundleIn = {
+  deviceId: number
+  registrationId: number
+  identityKey: string
+  signedPreKeyId: number
+  signedPreKey: string
+  signedPreKeySignature: string
+  oneTimePreKeys: ApiOneTimePreKey[]
+}
+export type ApiOneTimePreKeysIn = {
+  deviceId: number
+  keys: ApiOneTimePreKey[]
+}
+export type ApiKeyBundle = {
+  userId: string
+  deviceId: number
+  registrationId: number
+  identityKey: string
+  signedPreKeyId: number
+  signedPreKey: string
+  signedPreKeySignature: string
+  preKey: ApiOneTimePreKey | null
+}
+export type ApiKeyStatus = {
+  hasBundle: boolean
+  deviceId: number | null
+  oneTimeRemaining: number
+}
+export type ApiDevice = {
+  deviceId: number
+  registrationId: number
+  updatedAt: number
+}
+export type ApiDeviceList = {
+  userId: string
+  devices: ApiDevice[]
 }
 
 export type ApiUpload = {

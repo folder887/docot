@@ -7,8 +7,10 @@ import { Avatar } from '../components/Avatar'
 import { ChatComposer } from '../components/ChatComposer'
 import { MessageContent } from '../components/MessageBubble'
 import { Modal, ConfirmDialog } from '../components/Modal'
+import { IconLock } from '../components/Icons'
 import { api, getToken, openChatWebSocket } from '../api'
 import type { Message } from '../types'
+import { recallOutgoing } from '../crypto/outgoing'
 
 export function ChatDetailScreen() {
   const { id } = useParams<{ id: string }>()
@@ -51,16 +53,23 @@ export function ChatDetailScreen() {
 
   useEffect(() => {
     if (!id) return
-    void api
-      .getChat(id)
-      .then((full) => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const full = await api.getChat(id)
+        // Serialize: Signal Double Ratchet decryption mutates session state,
+        // so concurrent decrypts of messages from the same peer would race.
         for (const m of full.messages) {
-          addIncomingMessage(id, m)
+          if (cancelled) return
+          await addIncomingMessage(id, m)
         }
-      })
-      .catch(() => {
+      } catch {
         /* ignore */
-      })
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
@@ -69,6 +78,8 @@ export function ChatDetailScreen() {
     const tok = getToken()
     if (!tok) return
     const ws = openChatWebSocket(chat.id, tok)
+    // Serialize WS-driven decryption to avoid concurrent ratchet mutations.
+    let queue: Promise<void> = Promise.resolve()
     ws.onmessage = (ev) => {
       try {
         const data = JSON.parse(ev.data) as {
@@ -78,11 +89,21 @@ export function ChatDetailScreen() {
           deletedAt?: number
         }
         if (data.type === 'message' && data.message) {
-          if (data.message.authorId !== myId) {
-            addIncomingMessage(chat.id, data.message)
-          }
+          const incoming = data.message
+          // Skip the WebSocket echo of our own send: either the server
+          // confirmed authorship (regular message) or we have the plaintext
+          // cached locally (sealed message — the server stripped authorId).
+          // Without this, the sealed echo bypasses the dedupe path and races
+          // sendMessage's setState commit, overwriting our message with an
+          // empty body when the ratchet refuses to decrypt our own send.
+          queue = queue.then(async () => {
+            if (incoming.authorId === myId) return
+            if (incoming.sealed && (await recallOutgoing(incoming.id)) !== undefined) return
+            await addIncomingMessage(chat.id, incoming)
+          })
         } else if (data.type === 'message_edited' && data.message) {
-          applyMessageEdit(chat.id, data.message)
+          const edited = data.message
+          queue = queue.then(() => applyMessageEdit(chat.id, edited))
         } else if (data.type === 'message_deleted' && data.messageId) {
           applyMessageDelete(chat.id, data.messageId, data.deletedAt ?? Date.now())
         }
@@ -161,7 +182,10 @@ export function ChatDetailScreen() {
             <Avatar name={chat.title} size={32} filled={chat.kind !== 'dm' || peer?.kind !== 'user'} />
             <div className="min-w-0 text-left">
               <div className="truncate text-[15px] font-black leading-tight">{chat.title}</div>
-              <div className="truncate text-[11px] font-normal text-muted">{subtitle}</div>
+              <div className="flex items-center gap-1 truncate text-[11px] font-normal text-muted">
+                {chat.kind === 'dm' && <IconLock size={11} />}
+                <span className="truncate">{subtitle}</span>
+              </div>
             </div>
           </button>
         }

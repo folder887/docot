@@ -197,19 +197,56 @@ function ThemePreview({ value }: { value: Theme }) {
 
 /* ------------ FOLDERS ------------ */
 function FoldersSection() {
+  const { state } = useApp()
+  const lang = state.lang
+  const builtIn: Array<{ key: string; en: string; ru: string }> = [
+    { key: 'all', en: 'All', ru: 'Все' },
+    { key: 'groups', en: 'Groups', ru: 'Группы' },
+    { key: 'bots', en: 'Bots', ru: 'Боты' },
+  ]
   return (
     <div className="p-4">
-      <p className="text-sm text-muted">Default folders: All, Groups, Work, Bots. Custom folders coming soon.</p>
+      <p className="text-sm text-muted">
+        {lang === 'ru'
+          ? 'Папки можно создавать и менять прямо из списка чатов: жми + → Папки.'
+          : 'Folders can be created and edited from the chat list: tap + → Folders.'}
+      </p>
       <div className="mt-4 flex flex-col gap-2">
-        {['All', 'Groups', 'Work', 'Bots'].map((f) => (
-          <div key={f} className="flex items-center justify-between rounded-2xl border-2 border-ink px-4 py-3">
+        {builtIn.map((f) => (
+          <div
+            key={f.key}
+            className="flex items-center justify-between rounded-2xl border-2 border-ink px-4 py-3"
+          >
             <div>
-              <div className="font-bold">{f}</div>
-              <div className="text-xs text-muted">Built-in filter</div>
+              <div className="font-bold">{lang === 'ru' ? f.ru : f.en}</div>
+              <div className="text-xs text-muted">
+                {lang === 'ru' ? 'Встроенный фильтр' : 'Built-in filter'}
+              </div>
             </div>
-            <span className="text-xs font-bold uppercase tracking-wide text-muted">on</span>
           </div>
         ))}
+        {state.folders.map((f) => (
+          <div
+            key={f.id}
+            className="flex items-center justify-between rounded-2xl border-2 border-ink px-4 py-3"
+          >
+            <div>
+              <div className="font-bold">{f.name}</div>
+              <div className="text-xs text-muted">
+                {f.chatIds.length}{' '}
+                {lang === 'ru' ? 'чата(ов)' : 'chats'}
+              </div>
+            </div>
+            <span className="text-xs font-bold uppercase tracking-wide text-muted">
+              {lang === 'ru' ? 'свой' : 'custom'}
+            </span>
+          </div>
+        ))}
+        {state.folders.length === 0 && (
+          <p className="text-xs text-muted">
+            {lang === 'ru' ? 'Своих папок пока нет.' : 'No custom folders yet.'}
+          </p>
+        )}
       </div>
     </div>
   )

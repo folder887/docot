@@ -10,13 +10,11 @@ import { api } from '../api'
 import type { User } from '../types'
 import {
   IconBell,
-  IconBlock,
   IconChat,
   IconChevron,
   IconMoreH,
   IconPhone,
   IconQR,
-  IconUserPlus,
 } from '../components/Icons'
 
 export function ProfileScreen() {
@@ -144,7 +142,7 @@ export function ProfileScreen() {
       </div>
 
       {!isMe && (
-        <div className="mx-4 grid grid-cols-4 gap-2">
+        <div className="mx-4 grid grid-cols-3 gap-2">
           <ActionButton onClick={openDm} icon={<IconChat size={20} stroke={2} />} label={t('profile.message', state.lang)} />
           <ActionButton
             onClick={() => setPrefs({ muteAll: !state.prefs.muteAll })}
@@ -155,11 +153,6 @@ export function ProfileScreen() {
             onClick={() => setShowCall(true)}
             icon={<IconPhone size={20} />}
             label={t('profile.call', state.lang)}
-          />
-          <ActionButton
-            onClick={() => setShowMore(true)}
-            icon={<IconMoreH size={20} />}
-            label={t('profile.more', state.lang)}
           />
         </div>
       )}
@@ -179,16 +172,6 @@ export function ProfileScreen() {
         )}
         {user.bio && <InfoRow label={t('profile.bio', state.lang)} value={user.bio} multiline />}
       </div>
-
-      {!isMe && kind === 'user' && (
-        <button
-          className="mx-4 mt-4 flex items-center gap-3 rounded-2xl border-2 border-ink px-4 py-3 text-left font-bold"
-          onClick={toggleContact}
-        >
-          <IconUserPlus size={20} />
-          {user.isContact ? t('profile.removeContact', state.lang) : t('profile.addContact', state.lang)}
-        </button>
-      )}
 
       {sharedChats.length > 0 && (
         <div className="mt-6 px-4">
@@ -211,18 +194,6 @@ export function ProfileScreen() {
               </Link>
             ))}
           </div>
-        </div>
-      )}
-
-      {!isMe && (
-        <div className="mx-4 mt-6">
-          <button
-            onClick={() => (user.blocked ? toggleBlock() : setConfirmBlock(true))}
-            className="flex w-full items-center gap-3 rounded-2xl border-2 border-ink bg-paper px-4 py-3 font-bold text-ink"
-          >
-            <IconBlock size={20} />
-            {user.blocked ? t('profile.unblock', state.lang) : t('profile.block', state.lang)}
-          </button>
         </div>
       )}
 

@@ -66,18 +66,26 @@ class MessageOut(BaseModel):
     editedAt: int | None = None
     deletedAt: int | None = None
     replyToId: str | None = None
+    sealed: bool = False
 
     class Config:
         from_attributes = True
 
 
 class MessageIn(BaseModel):
-    text: str = Field(min_length=1, max_length=4000)
+    # 64 KB accommodates plaintext (≤4000 chars) plus the ~1.78× expansion of a
+    # double-base64 Signal envelope, multiplied by up to ~16 sibling devices when
+    # using the multi-device fanout envelope (`__sig1m:`).
+    text: str = Field(min_length=1, max_length=65000)
     replyToId: str | None = None
+    # When true (DM only), the server stores the real author privately but the
+    # public `authorId` field is blanked in API responses and WS events.
+    sealed: bool = False
 
 
 class MessagePatch(BaseModel):
-    text: str = Field(min_length=1, max_length=4000)
+    text: str = Field(min_length=1, max_length=65000)
+    sealed: bool | None = None
 
 
 class ChatOut(BaseModel):
@@ -240,6 +248,61 @@ class FolderIn(BaseModel):
 class FolderPatch(BaseModel):
     name: str | None = None
     chatIds: list[str] | None = None
+
+
+class PreKeyOut(BaseModel):
+    keyId: int
+    publicKey: str
+
+
+class KeyBundleIn(BaseModel):
+    """Identity + signed prekey + initial OTP pool, scoped to a single device.
+
+    Uploaded once per device (signup or new login on a fresh browser/app); OTPs
+    are replenished separately via /keys/onetime."""
+
+    deviceId: int = Field(ge=1, le=2**31 - 1)
+    registrationId: int = Field(ge=1)
+    identityKey: str
+    signedPreKeyId: int = Field(ge=0)
+    signedPreKey: str
+    signedPreKeySignature: str
+    oneTimePreKeys: list[PreKeyOut] = Field(default_factory=list)
+
+
+class OneTimePreKeysIn(BaseModel):
+    deviceId: int = Field(ge=1, le=2**31 - 1)
+    keys: list[PreKeyOut]
+
+
+class KeyBundleOut(BaseModel):
+    """A consumable bundle for a single device: identity + signed prekey + one OTP."""
+
+    userId: str
+    deviceId: int
+    registrationId: int
+    identityKey: str
+    signedPreKeyId: int
+    signedPreKey: str
+    signedPreKeySignature: str
+    preKey: PreKeyOut | None = None
+
+
+class KeyStatusOut(BaseModel):
+    hasBundle: bool
+    deviceId: int | None = None
+    oneTimeRemaining: int
+
+
+class DeviceOut(BaseModel):
+    deviceId: int
+    registrationId: int
+    updatedAt: int
+
+
+class DeviceListOut(BaseModel):
+    userId: str
+    devices: list[DeviceOut] = []
 
 
 AuthOut.model_rebuild()

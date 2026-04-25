@@ -36,6 +36,10 @@ export type Message = {
   editedAt?: number | null
   deletedAt?: number | null
   replyToId?: string | null
+  /** True for sealed-sender DM messages. The server returns an empty
+   * `authorId`; the client substitutes the inferred sender (the other
+   * participant in the DM). */
+  sealed?: boolean
 }
 
 export type ChatRole = 'owner' | 'admin' | 'member'
