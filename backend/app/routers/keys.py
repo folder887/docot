@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -94,19 +94,27 @@ def fetch_bundle(
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="bundle_not_found")
 
-    one = (
-        db.execute(
-            select(OneTimePreKey)
-            .where(OneTimePreKey.user_id == user_id, OneTimePreKey.consumed.is_(False))
-            .order_by(OneTimePreKey.id.asc())
-            .limit(1)
-        )
-        .scalar_one_or_none()
+    # Atomically claim one OTP: a single UPDATE...WHERE id=(SELECT...) RETURNING
+    # ensures two concurrent fetchers cannot grab the same prekey. SQLite ≥3.35
+    # and PostgreSQL both support RETURNING.
+    inner = (
+        select(OneTimePreKey.id)
+        .where(OneTimePreKey.user_id == user_id, OneTimePreKey.consumed.is_(False))
+        .order_by(OneTimePreKey.id.asc())
+        .limit(1)
+        .scalar_subquery()
     )
-    if one is not None:
-        one.consumed = True
-        db.commit()
+    claimed = db.execute(
+        update(OneTimePreKey)
+        .where(OneTimePreKey.id == inner)
+        .values(consumed=True)
+        .returning(OneTimePreKey.key_id, OneTimePreKey.public_key)
+    ).first()
+    db.commit()
 
+    pre_key = (
+        PreKeyOut(keyId=claimed.key_id, publicKey=claimed.public_key) if claimed else None
+    )
     return KeyBundleOut(
         userId=user_id,
         registrationId=row.registration_id,
@@ -114,7 +122,7 @@ def fetch_bundle(
         signedPreKeyId=row.signed_pre_key_id,
         signedPreKey=row.signed_pre_key,
         signedPreKeySignature=row.signed_pre_key_signature,
-        preKey=PreKeyOut(keyId=one.key_id, publicKey=one.public_key) if one else None,
+        preKey=pre_key,
     )
 
 

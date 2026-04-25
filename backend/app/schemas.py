@@ -72,12 +72,14 @@ class MessageOut(BaseModel):
 
 
 class MessageIn(BaseModel):
-    text: str = Field(min_length=1, max_length=4000)
+    # 16 KB accommodates plaintext (≤4000 chars) plus the ~1.78× expansion of a
+    # double-base64 Signal envelope (`__sig1:` + JSON{type, regId, body}).
+    text: str = Field(min_length=1, max_length=16000)
     replyToId: str | None = None
 
 
 class MessagePatch(BaseModel):
-    text: str = Field(min_length=1, max_length=4000)
+    text: str = Field(min_length=1, max_length=16000)
 
 
 class ChatOut(BaseModel):

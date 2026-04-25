@@ -136,6 +136,27 @@ function msgFromApi(m: ApiMessage): Message {
   }
 }
 
+/** Resolve a single (possibly-encrypted) message to its plaintext form using
+ * the local caches and, for peer messages, the Signal session. */
+async function resolvePlaintext(
+  me: User,
+  peerId: string,
+  m: Message,
+): Promise<Message | null> {
+  if (!isEncryptedEnvelope(m.text)) return null
+  if (m.authorId === me.id) {
+    const cached = await recallOutgoing(m.id)
+    return { ...m, text: cached ?? '' }
+  }
+  const cachedIn = await recallIncoming(m.id)
+  if (cachedIn !== undefined) return { ...m, text: cachedIn }
+  const plain = await maybeDecrypt(peerId, m.text)
+  if (plain) {
+    rememberIncoming(m.id, plain).catch(() => {})
+  }
+  return { ...m, text: plain }
+}
+
 async function decryptHistory(
   me: User,
   chats: Chat[],
@@ -145,45 +166,33 @@ async function decryptHistory(
     if (chat.kind !== 'dm') continue
     const peerId = chat.participants.find((p) => p !== me.id)
     if (!peerId) continue
-    let changed = false
-    const next: Message[] = []
-    for (const m of chat.messages) {
-      if (!isEncryptedEnvelope(m.text)) {
-        next.push(m)
-        continue
-      }
-      if (m.authorId === me.id) {
-        const cached = await recallOutgoing(m.id)
-        next.push(cached !== undefined ? { ...m, text: cached } : { ...m, text: '' })
-        changed = true
-        continue
-      }
-      // Incoming: prefer the cached plaintext from the first decrypt; the
-      // Signal ratchet has advanced past this message and a second attempt
-      // would fail.
-      const cachedIn = await recallIncoming(m.id)
-      if (cachedIn !== undefined) {
-        next.push({ ...m, text: cachedIn })
-        changed = true
-        continue
-      }
-      const plain = await maybeDecrypt(peerId, m.text)
-      if (plain) {
-        rememberIncoming(m.id, plain).catch(() => {})
-      }
-      next.push({ ...m, text: plain })
-      changed = true
+    // listChats returns chats with empty `messages`; full history is loaded
+    // per-chat via api.getChat → addIncomingMessage. The list view, however,
+    // shows `lastMessage` as a preview, which may be ciphertext.
+    let resolvedLast: Message | null = null
+    if (chat.lastMessage) {
+      resolvedLast = await resolvePlaintext(me, peerId, chat.lastMessage)
     }
-    if (!changed) continue
-    const lastPlain = next.length ? next[next.length - 1] : null
+    const next: Message[] = []
+    let messagesChanged = false
+    for (const m of chat.messages) {
+      const r = await resolvePlaintext(me, peerId, m)
+      if (r) {
+        messagesChanged = true
+        next.push(r)
+      } else {
+        next.push(m)
+      }
+    }
+    if (!resolvedLast && !messagesChanged) continue
     setState((s) => ({
       ...s,
       chats: s.chats.map((c) =>
         c.id === chat.id
           ? {
               ...c,
-              messages: next,
-              lastMessage: lastPlain ?? c.lastMessage,
+              messages: messagesChanged ? next : c.messages,
+              lastMessage: resolvedLast ?? c.lastMessage,
             }
           : c,
       ),
@@ -530,13 +539,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const addIncomingMessage = useCallback(
     async (chatId: string, msg: Message) => {
       let final = msg
-      if (isEncryptedEnvelope(msg.text) && state.me && msg.authorId !== state.me.id) {
-        const cached = await recallIncoming(msg.id)
-        const plain = cached !== undefined ? cached : await maybeDecrypt(msg.authorId, msg.text)
-        if (cached === undefined && plain) {
-          rememberIncoming(msg.id, plain).catch(() => {})
+      if (isEncryptedEnvelope(msg.text) && state.me) {
+        if (msg.authorId === state.me.id) {
+          // Our own outgoing ciphertext — we never had the key, restore from
+          // the local plaintext cache populated at send time.
+          const cached = await recallOutgoing(msg.id)
+          final = { ...msg, text: cached ?? '' }
+        } else {
+          const cached = await recallIncoming(msg.id)
+          const plain =
+            cached !== undefined ? cached : await maybeDecrypt(msg.authorId, msg.text)
+          if (cached === undefined && plain) {
+            rememberIncoming(msg.id, plain).catch(() => {})
+          }
+          final = { ...msg, text: plain }
         }
-        final = { ...msg, text: plain }
       }
       setState((s) => ({
         ...s,
