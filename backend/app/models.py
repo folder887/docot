@@ -201,4 +201,40 @@ class ChatFolderMember(Base):
     chat_id: Mapped[str] = mapped_column(String, ForeignKey("chats.id", ondelete="CASCADE"), index=True)
 
 
+class UserKeys(Base):
+    """Public Signal-protocol key bundle for a user.
+
+    Private keys never leave the client; only public/signed values are stored here.
+    Encoded as base64-url strings.
+    """
+
+    __tablename__ = "user_keys"
+
+    user_id: Mapped[str] = mapped_column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    registration_id: Mapped[int] = mapped_column(Integer)
+    identity_key: Mapped[str] = mapped_column(Text)
+    signed_pre_key_id: Mapped[int] = mapped_column(Integer)
+    signed_pre_key: Mapped[str] = mapped_column(Text)
+    signed_pre_key_signature: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[int] = mapped_column(Integer, default=now_ms)
+
+
+class OneTimePreKey(Base):
+    """Pool of one-time prekeys; consumed atomically when a peer fetches a bundle."""
+
+    __tablename__ = "one_time_prekeys"
+    __table_args__ = (UniqueConstraint("user_id", "key_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    key_id: Mapped[int] = mapped_column(Integer)
+    public_key: Mapped[str] = mapped_column(Text)
+    consumed: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    created_at: Mapped[int] = mapped_column(Integer, default=now_ms)
+
+
 Index("ix_messages_chat_created", Message.chat_id, Message.created_at)

@@ -22,6 +22,10 @@ import type {
   User,
 } from './types'
 import { defaultPrefs } from './types'
+import { ensureIdentity } from './crypto/identity'
+import { encryptForUser, isEncryptedEnvelope, maybeDecrypt } from './crypto/session'
+import { idbClearAll } from './crypto/idb'
+import { recallOutgoing, rememberOutgoing } from './crypto/outgoing'
 
 const PREFS_KEY = 'docot:prefs'
 const LANG_KEY = 'docot:lang'
@@ -81,7 +85,7 @@ type Ctx = {
   peerOf: (chat: Chat) => User | null
   searchUsers: (q: string) => Promise<User[]>
   refresh: () => Promise<void>
-  addIncomingMessage: (chatId: string, msg: Message) => void
+  addIncomingMessage: (chatId: string, msg: Message) => Promise<void>
 }
 
 const AppCtx = createContext<Ctx | null>(null)
@@ -124,6 +128,49 @@ function msgFromApi(m: ApiMessage): Message {
     editedAt: m.editedAt ?? null,
     deletedAt: m.deletedAt ?? null,
     replyToId: m.replyToId ?? null,
+  }
+}
+
+async function decryptHistory(
+  me: User,
+  chats: Chat[],
+  setState: (updater: (s: AppState) => AppState) => void,
+): Promise<void> {
+  for (const chat of chats) {
+    if (chat.kind !== 'dm') continue
+    const peerId = chat.participants.find((p) => p !== me.id)
+    if (!peerId) continue
+    let changed = false
+    const next: Message[] = []
+    for (const m of chat.messages) {
+      if (!isEncryptedEnvelope(m.text)) {
+        next.push(m)
+        continue
+      }
+      if (m.authorId === me.id) {
+        const cached = await recallOutgoing(m.id)
+        next.push(cached !== undefined ? { ...m, text: cached } : { ...m, text: '' })
+        changed = true
+        continue
+      }
+      const plain = await maybeDecrypt(peerId, m.text)
+      next.push({ ...m, text: plain })
+      changed = true
+    }
+    if (!changed) continue
+    const lastPlain = next.length ? next[next.length - 1] : null
+    setState((s) => ({
+      ...s,
+      chats: s.chats.map((c) =>
+        c.id === chat.id
+          ? {
+              ...c,
+              messages: next,
+              lastMessage: lastPlain ?? c.lastMessage,
+            }
+          : c,
+      ),
+    }))
   }
 }
 
@@ -260,18 +307,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const usersIdx: Record<string, User> = {}
     for (const u of allUsers) usersIdx[u.id] = u
 
+    const mappedChats = chats.map(chatFromApi).sort(sortChats)
     setState((s) => ({
       ...s,
       status: 'authed',
       onboarded: true,
       me,
       users: { ...s.users, ...usersIdx },
-      chats: chats.map(chatFromApi).sort(sortChats),
+      chats: mappedChats,
       notes: notes.map(noteFromApi),
       events: events.map(eventFromApi),
       news: posts.map(postFromApi),
       folders: folders.map(folderFromApi),
     }))
+    void decryptHistory(me, mappedChats, setState)
   }, [])
 
   // boot: try to fetch me via stored token
@@ -312,6 +361,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const { token, user } = await api.signup(handle, name, password)
       setToken(token)
       await hydrate(userFromApi(user))
+      ensureIdentity().catch((err) => console.warn('e2e bootstrap', err))
     },
     [hydrate],
   )
@@ -321,12 +371,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const { token, user } = await api.login(handle, password)
       setToken(token)
       await hydrate(userFromApi(user))
+      ensureIdentity().catch((err) => console.warn('e2e bootstrap', err))
     },
     [hydrate],
   )
 
   const logout = useCallback(() => {
     setToken(null)
+    idbClearAll().catch(() => {})
     setState((s) => emptyState(s.lang, s.prefs, 'anon'))
   }, [])
 
@@ -339,9 +391,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
     async (chatId: string, text: string, replyToId?: string | null) => {
       const trimmed = text.trim()
       if (!trimmed) return
-      const msg = msgFromApi(
-        await api.sendMessage(chatId, { text: trimmed, replyToId: replyToId ?? null }),
-      )
+      const chat = state.chats.find((c) => c.id === chatId)
+      const peerId = chat && chat.kind === 'dm' && state.me
+        ? chat.participants.find((p) => p !== state.me?.id) ?? null
+        : null
+      let payload = trimmed
+      if (peerId) {
+        try {
+          payload = await encryptForUser(peerId, trimmed)
+        } catch (err) {
+          console.warn('encrypt failed, sending plaintext', err)
+        }
+      }
+      const apiMsg = await api.sendMessage(chatId, {
+        text: payload,
+        replyToId: replyToId ?? null,
+      })
+      const msg: Message = { ...msgFromApi(apiMsg), text: trimmed }
+      if (peerId) {
+        rememberOutgoing(msg.id, trimmed).catch(() => {})
+      }
       setState((s) => ({
         ...s,
         chats: s.chats
@@ -358,7 +427,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           .sort(sortChats),
       }))
     },
-    [],
+    [state.chats, state.me],
   )
 
   const applyMessageEdit = useCallback((chatId: string, msg: Message) => {
@@ -441,25 +510,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return chat.id
   }, [])
 
-  const addIncomingMessage = useCallback((chatId: string, msg: Message) => {
-    setState((s) => ({
-      ...s,
-      chats: s.chats
-        .map((c) =>
-          c.id === chatId
-            ? c.messages.some((m) => m.id === msg.id)
-              ? c
-              : {
-                  ...c,
-                  messages: [...c.messages, msg],
-                  lastMessage: msg,
-                  updatedAt: msg.at,
-                }
-            : c,
-        )
-        .sort(sortChats),
-    }))
-  }, [])
+  const addIncomingMessage = useCallback(
+    async (chatId: string, msg: Message) => {
+      let final = msg
+      if (isEncryptedEnvelope(msg.text) && state.me && msg.authorId !== state.me.id) {
+        const plain = await maybeDecrypt(msg.authorId, msg.text)
+        final = { ...msg, text: plain }
+      }
+      setState((s) => ({
+        ...s,
+        chats: s.chats
+          .map((c) =>
+            c.id === chatId
+              ? c.messages.some((m) => m.id === final.id)
+                ? c
+                : {
+                    ...c,
+                    messages: [...c.messages, final],
+                    lastMessage: final,
+                    updatedAt: final.at,
+                  }
+              : c,
+          )
+          .sort(sortChats),
+      }))
+    },
+    [state.me],
+  )
 
   const createChat = useCallback(
     async (participantIds: string[], kind: Chat['kind'] = 'dm', title?: string) => {

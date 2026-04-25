@@ -242,4 +242,42 @@ class FolderPatch(BaseModel):
     chatIds: list[str] | None = None
 
 
+class PreKeyOut(BaseModel):
+    keyId: int
+    publicKey: str
+
+
+class KeyBundleIn(BaseModel):
+    """Identity + signed prekey + initial OTP pool. Uploaded once on signup; OTPs are
+    replenished separately via /keys/onetime."""
+
+    registrationId: int = Field(ge=1)
+    identityKey: str
+    signedPreKeyId: int = Field(ge=0)
+    signedPreKey: str
+    signedPreKeySignature: str
+    oneTimePreKeys: list[PreKeyOut] = Field(default_factory=list)
+
+
+class OneTimePreKeysIn(BaseModel):
+    keys: list[PreKeyOut]
+
+
+class KeyBundleOut(BaseModel):
+    """A consumable bundle: identity + signed prekey + (optionally) one OTP."""
+
+    userId: str
+    registrationId: int
+    identityKey: str
+    signedPreKeyId: int
+    signedPreKey: str
+    signedPreKeySignature: str
+    preKey: PreKeyOut | None = None
+
+
+class KeyStatusOut(BaseModel):
+    hasBundle: bool
+    oneTimeRemaining: int
+
+
 AuthOut.model_rebuild()

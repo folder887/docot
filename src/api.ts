@@ -313,6 +313,15 @@ export const api = {
   deleteFolder: (id: string) =>
     request<{ ok: boolean }>(`/folders/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
+  // E2E key bundles
+  uploadBundle: (body: ApiKeyBundleIn) =>
+    request<ApiKeyStatus>('/keys/bundle', { method: 'POST', body: JSON.stringify(body) }),
+  replenishOneTime: (body: { keys: ApiOneTimePreKey[] }) =>
+    request<ApiKeyStatus>('/keys/onetime', { method: 'POST', body: JSON.stringify(body) }),
+  keysStatus: () => request<ApiKeyStatus>('/keys/status'),
+  getKeyBundle: (userId: string) =>
+    request<ApiKeyBundle>(`/keys/bundle/${encodeURIComponent(userId)}`),
+
   // uploads
   uploadFile: async (file: Blob, filename = 'file'): Promise<ApiUpload> => {
     const fd = new FormData()
@@ -325,6 +334,26 @@ export const api = {
     return (await res.json()) as ApiUpload
   },
 }
+
+export type ApiOneTimePreKey = { keyId: number; publicKey: string }
+export type ApiKeyBundleIn = {
+  registrationId: number
+  identityKey: string
+  signedPreKeyId: number
+  signedPreKey: string
+  signedPreKeySignature: string
+  oneTimePreKeys: ApiOneTimePreKey[]
+}
+export type ApiKeyBundle = {
+  userId: string
+  registrationId: number
+  identityKey: string
+  signedPreKeyId: number
+  signedPreKey: string
+  signedPreKeySignature: string
+  preKey: ApiOneTimePreKey | null
+}
+export type ApiKeyStatus = { hasBundle: boolean; oneTimeRemaining: number }
 
 export type ApiUpload = {
   id: string

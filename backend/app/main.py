@@ -8,7 +8,18 @@ from sqlalchemy import inspect, text
 
 from .config import get_settings
 from .db import Base, engine
-from .routers import auth, chats, events, folders, invites, notes, posts, uploads, users
+from .routers import (
+    auth,
+    chats,
+    events,
+    folders,
+    invites,
+    keys,
+    notes,
+    posts,
+    uploads,
+    users,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +77,7 @@ def create_app() -> FastAPI:
     app.include_router(posts.router)
     app.include_router(folders.router)
     app.include_router(invites.router)
+    app.include_router(keys.router)
     app.include_router(uploads.router)
     return app
 

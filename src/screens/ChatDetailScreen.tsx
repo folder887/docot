@@ -7,6 +7,7 @@ import { Avatar } from '../components/Avatar'
 import { ChatComposer } from '../components/ChatComposer'
 import { MessageContent } from '../components/MessageBubble'
 import { Modal, ConfirmDialog } from '../components/Modal'
+import { IconLock } from '../components/Icons'
 import { api, getToken, openChatWebSocket } from '../api'
 import type { Message } from '../types'
 
@@ -161,7 +162,10 @@ export function ChatDetailScreen() {
             <Avatar name={chat.title} size={32} filled={chat.kind !== 'dm' || peer?.kind !== 'user'} />
             <div className="min-w-0 text-left">
               <div className="truncate text-[15px] font-black leading-tight">{chat.title}</div>
-              <div className="truncate text-[11px] font-normal text-muted">{subtitle}</div>
+              <div className="flex items-center gap-1 truncate text-[11px] font-normal text-muted">
+                {chat.kind === 'dm' && <IconLock size={11} />}
+                <span className="truncate">{subtitle}</span>
+              </div>
             </div>
           </button>
         }
