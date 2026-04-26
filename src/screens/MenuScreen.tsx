@@ -8,12 +8,13 @@ export function MenuScreen() {
   const me = state.me
   const items = [
     { to: me ? `/profile/${me.id}` : '/settings', label: t('settings.myAccount', state.lang) },
+    { to: '/settings/edit-profile', label: t('settings.editProfile', state.lang) },
     { to: '/settings', label: t('menu.settings', state.lang) },
   ]
   return (
     <div className="flex flex-col bg-paper text-ink">
       <section className="flex items-center gap-4 border-b-2 border-ink p-5">
-        <Avatar name={me?.name ?? '?'} size={64} />
+        <Avatar name={me?.name ?? '?'} size={64} src={me?.avatarUrl} />
         <div className="flex-1">
           <div className="text-lg font-black">{me?.name ?? '—'}</div>
           <div className="text-sm text-muted">{me?.handle ? `@${me.handle}` : ''}</div>

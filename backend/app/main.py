@@ -30,10 +30,16 @@ logger = logging.getLogger(__name__)
 _MIGRATIONS: list[tuple[str, str, str]] = [
     ("chats", "description", "TEXT NOT NULL DEFAULT ''"),
     ("chats", "is_public", "INTEGER NOT NULL DEFAULT 0"),
+    ("chats", "slow_mode_seconds", "INTEGER NOT NULL DEFAULT 0"),
+    ("chats", "subscribers_only", "INTEGER NOT NULL DEFAULT 0"),
+    ("chats", "signed_posts", "INTEGER NOT NULL DEFAULT 0"),
     ("messages", "edited_at", "INTEGER"),
     ("messages", "deleted_at", "INTEGER"),
     ("messages", "reply_to_id", "VARCHAR"),
     ("messages", "sealed", "INTEGER NOT NULL DEFAULT 0"),
+    ("users", "avatar_url", "VARCHAR(500) NOT NULL DEFAULT ''"),
+    ("users", "links", "TEXT NOT NULL DEFAULT ''"),
+    ("users", "bot_owner_id", "VARCHAR NOT NULL DEFAULT ''"),
 ]
 
 

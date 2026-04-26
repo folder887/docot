@@ -377,6 +377,42 @@ export function IconCode({ size = 18, className }: IconProps) {
   )
 }
 
+export function IconHighlight({ size = 18, className }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} stroke="currentColor" strokeWidth={2} fill="none" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M9 11l-4 4 1 4 4-1 4-4-5-3z" />
+      <path d="M14 6l4 4-3 3-4-4z" />
+      <path d="M3 21h6" />
+    </svg>
+  )
+}
+
+export function IconQuote({ size = 18, className }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} stroke="currentColor" strokeWidth={2} fill="none" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M6 17a4 4 0 0 1-3-7l3 3v4zM18 17a4 4 0 0 1-3-7l3 3v4z" />
+    </svg>
+  )
+}
+
+export function IconCallout({ size = 18, className }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} stroke="currentColor" strokeWidth={2} fill="none" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 8v5" />
+      <circle cx="12" cy="16" r=".6" fill="currentColor" />
+    </svg>
+  )
+}
+
+export function IconType({ size = 18, className }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} stroke="currentColor" strokeWidth={2} fill="none" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M5 7V5h14v2M9 5v14M15 13v6M9 19h6" />
+    </svg>
+  )
+}
+
 export function IconImage({ size = 22, className, stroke = 2 }: IconProps) {
   return (
     <svg {...base(size)} className={className} stroke="currentColor" strokeWidth={stroke} fill="none" strokeLinecap="round" strokeLinejoin="round">

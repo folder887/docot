@@ -1,15 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   IconBold,
+  IconCallout,
   IconCode,
+  IconHighlight,
   IconImage,
   IconItalic,
   IconMic,
   IconPaperclip,
+  IconQuote,
   IconSend,
   IconStop,
   IconStrike,
   IconTrash,
+  IconType,
 } from './Icons'
 import { api } from '../api'
 import { encodeMedia, type MediaDescriptor } from '../messageMedia'
@@ -35,6 +39,7 @@ const MARKERS: Record<string, string> = {
   italic: '*',
   strike: '~~',
   code: '`',
+  highlight: '==',
 }
 
 function wrapSelection(textarea: HTMLTextAreaElement, marker: string): { value: string; start: number; end: number } {
@@ -46,6 +51,42 @@ function wrapSelection(textarea: HTMLTextAreaElement, marker: string): { value: 
   const after = v.slice(e)
   const next = `${before}${marker}${sel}${marker}${after}`
   return { value: next, start: s + marker.length, end: e + marker.length }
+}
+
+/** Prepend `prefix` to the start of every line that the current selection
+ *  touches. Used for headings, quotes and callouts which are line-prefixed
+ *  in our markdown subset. */
+function prependLines(textarea: HTMLTextAreaElement, prefix: string): { value: string; start: number; end: number } {
+  const v = textarea.value
+  const s = textarea.selectionStart ?? v.length
+  const e = textarea.selectionEnd ?? v.length
+  const lineStart = v.lastIndexOf('\n', s - 1) + 1
+  const lineEnd = (() => {
+    const next = v.indexOf('\n', e)
+    return next === -1 ? v.length : next
+  })()
+  const block = v.slice(lineStart, lineEnd)
+  const replaced = block
+    .split('\n')
+    .map((ln) => (ln.startsWith(prefix) ? ln : `${prefix}${ln}`))
+    .join('\n')
+  const before = v.slice(0, lineStart)
+  const after = v.slice(lineEnd)
+  const next = `${before}${replaced}${after}`
+  const delta = replaced.length - block.length
+  return { value: next, start: s + prefix.length, end: e + delta }
+}
+
+function wrapColor(textarea: HTMLTextAreaElement, color: string): { value: string; start: number; end: number } {
+  const v = textarea.value
+  const s = textarea.selectionStart ?? v.length
+  const e = textarea.selectionEnd ?? v.length
+  const sel = v.slice(s, e) || 'text'
+  const before = v.slice(0, s)
+  const after = v.slice(e)
+  const wrapped = `[${color}:${sel}]`
+  const next = `${before}${wrapped}${after}`
+  return { value: next, start: s + color.length + 2, end: s + color.length + 2 + sel.length }
 }
 
 function fmt(s: number): string {
@@ -78,6 +119,7 @@ export function ChatComposer({
   const [uploading, setUploading] = useState(false)
   const [attachOpen, setAttachOpen] = useState(false)
   const [pollOpen, setPollOpen] = useState(false)
+  const [formatOpen, setFormatOpen] = useState(false)
   const taRef = useRef<HTMLTextAreaElement>(null)
   const recorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
@@ -102,6 +144,28 @@ export function ChatComposer({
     if (!ta) return
     const m = MARKERS[kind]
     const { value, start, end } = wrapSelection(ta, m)
+    setText(value)
+    requestAnimationFrame(() => {
+      ta.focus()
+      ta.setSelectionRange(start, end)
+    })
+  }
+
+  function applyLinePrefix(prefix: string) {
+    const ta = taRef.current
+    if (!ta) return
+    const { value, start, end } = prependLines(ta, prefix)
+    setText(value)
+    requestAnimationFrame(() => {
+      ta.focus()
+      ta.setSelectionRange(start, end)
+    })
+  }
+
+  function applyColor(color: string) {
+    const ta = taRef.current
+    if (!ta) return
+    const { value, start, end } = wrapColor(ta, color)
     setText(value)
     requestAnimationFrame(() => {
       ta.focus()
@@ -276,10 +340,10 @@ export function ChatComposer({
           </button>
         </div>
       )}
-      {hasSelection && (
-        <div className="flex items-center gap-1 border-b border-ink/15 px-2 py-1">
-          {(['bold', 'italic', 'strike', 'code'] as const).map((k) => {
-            const Icon = { bold: IconBold, italic: IconItalic, strike: IconStrike, code: IconCode }[k]
+      {(hasSelection || formatOpen) && (
+        <div className="flex flex-wrap items-center gap-1 border-b border-ink/15 px-2 py-1">
+          {(['bold', 'italic', 'strike', 'code', 'highlight'] as const).map((k) => {
+            const Icon = { bold: IconBold, italic: IconItalic, strike: IconStrike, code: IconCode, highlight: IconHighlight }[k]
             return (
               <button
                 key={k}
@@ -293,6 +357,75 @@ export function ChatComposer({
               </button>
             )
           })}
+          <span className="mx-1 h-5 w-px bg-ink/20" aria-hidden />
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => applyLinePrefix('# ')}
+            className="flex h-8 min-w-8 items-center justify-center rounded-full px-2 text-sm font-black text-ink hover:bg-ink/10"
+            aria-label="heading 1"
+          >
+            H1
+          </button>
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => applyLinePrefix('## ')}
+            className="flex h-8 min-w-8 items-center justify-center rounded-full px-2 text-sm font-black text-ink hover:bg-ink/10"
+            aria-label="heading 2"
+          >
+            H2
+          </button>
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => applyLinePrefix('### ')}
+            className="flex h-8 min-w-8 items-center justify-center rounded-full px-2 text-sm font-black text-ink hover:bg-ink/10"
+            aria-label="heading 3"
+          >
+            H3
+          </button>
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => applyLinePrefix('> ')}
+            className="flex h-8 w-8 items-center justify-center rounded-full text-ink hover:bg-ink/10"
+            aria-label="quote"
+            title="Quote"
+          >
+            <IconQuote size={16} />
+          </button>
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => applyLinePrefix('!> ')}
+            className="flex h-8 w-8 items-center justify-center rounded-full text-ink hover:bg-ink/10"
+            aria-label="callout"
+            title="Callout"
+          >
+            <IconCallout size={16} />
+          </button>
+          <span className="mx-1 h-5 w-px bg-ink/20" aria-hidden />
+          {(['red', 'orange', 'green', 'blue', 'purple'] as const).map((c) => (
+            <button
+              key={c}
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => applyColor(c)}
+              className="h-6 w-6 rounded-full border border-ink/30"
+              style={{
+                backgroundColor: {
+                  red: '#dc2626',
+                  orange: '#ea580c',
+                  green: '#16a34a',
+                  blue: '#2563eb',
+                  purple: '#9333ea',
+                }[c],
+              }}
+              aria-label={`color ${c}`}
+              title={`Color: ${c}`}
+            />
+          ))}
         </div>
       )}
       <form className="flex items-end gap-2 px-3 py-2" onSubmit={handleSubmit}>
@@ -342,6 +475,15 @@ export function ChatComposer({
             {uploading ? <IconImage size={18} /> : <IconPaperclip size={20} />}
           </button>
         </div>
+        <button
+          type="button"
+          onClick={() => setFormatOpen((v) => !v)}
+          className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-2 border-ink text-ink disabled:opacity-50 ${formatOpen ? 'bg-ink text-paper' : ''}`}
+          aria-label="formatting"
+          title="Formatting"
+        >
+          <IconType size={20} />
+        </button>
         <textarea
           ref={taRef}
           value={text}

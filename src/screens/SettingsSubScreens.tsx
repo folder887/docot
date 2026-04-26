@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useApp } from '../store'
 import { t } from '../i18n'
 import type { Theme, Wallpaper } from '../types'
 import { ScreenHeader } from '../components/ScreenHeader'
 import { QRCode } from '../components/QRCode'
+import { Avatar } from '../components/Avatar'
 
 export function SettingsSubScreen() {
   const { section } = useParams<{ section: string }>()
@@ -27,6 +28,8 @@ export function SettingsSubScreen() {
       return <Section title={t('settings.devices', lang)}><DevicesSection /></Section>
     case 'battery':
       return <Section title={t('settings.battery', lang)}><BatterySection /></Section>
+    case 'edit-profile':
+      return <Section title={t('settings.editProfile', lang)}><EditProfileSection /></Section>
     default:
       return <Section title="Settings"><div className="p-6 text-muted">Unknown section.</div></Section>
   }
@@ -718,6 +721,182 @@ function DevicesList({ userId }: { userId: string | null }) {
 }
 
 /* ------------ BATTERY & ANIMATIONS ------------ */
+function EditProfileSection() {
+  const { state, updateMe } = useApp()
+  const me = state.me
+  const lang = state.lang
+  const [name, setName] = useState(me?.name ?? '')
+  const [bio, setBio] = useState(me?.bio ?? '')
+  const [phone, setPhone] = useState(me?.phone ?? '')
+  const [links, setLinks] = useState<string[]>(me?.links?.length ? me.links : [''])
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(me?.avatarUrl ?? null)
+  const [busy, setBusy] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [msg, setMsg] = useState<string | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const setLink = (i: number, v: string) =>
+    setLinks((arr) => arr.map((x, j) => (j === i ? v : x)))
+  const addLink = () =>
+    setLinks((arr) => (arr.length < 10 ? [...arr, ''] : arr))
+  const removeLink = (i: number) =>
+    setLinks((arr) => arr.filter((_, j) => j !== i))
+
+  const onPickAvatar = async (file: File | null) => {
+    if (!file) return
+    if (file.size > 4 * 1024 * 1024) {
+      setMsg('Avatar must be < 4 MB')
+      return
+    }
+    setUploading(true)
+    try {
+      const { api, API_URL } = await import('../api')
+      const up = await api.uploadFile(file, file.name || 'avatar.png')
+      const fullUrl = up.url.startsWith('http') ? up.url : `${API_URL}${up.url}`
+      setAvatarUrl(fullUrl)
+    } catch {
+      setMsg('Avatar upload failed')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const onSave = async () => {
+    setBusy(true)
+    setMsg(null)
+    try {
+      const cleanedLinks = links.map((l) => l.trim()).filter(Boolean)
+      await updateMe({
+        name: name.trim() || undefined,
+        bio,
+        phone,
+        avatarUrl,
+        links: cleanedLinks,
+      })
+      setMsg(t('settings.saved', lang))
+    } catch (err) {
+      const m = err instanceof Error ? err.message : 'Save failed'
+      setMsg(m)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (!me) return <div className="p-6 text-muted">…</div>
+
+  return (
+    <div className="px-4 py-4">
+      <SectionHeader text={t('settings.editProfile', lang)} />
+
+      <div className="mb-4 flex items-center gap-4">
+        <Avatar name={name || me.handle} size={72} src={avatarUrl} />
+        <div className="flex flex-col gap-2">
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            hidden
+            onChange={(e) => void onPickAvatar(e.target.files?.[0] ?? null)}
+          />
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            disabled={uploading}
+            className="rounded-full border-2 border-ink px-4 py-2 text-sm font-bold disabled:opacity-50"
+          >
+            {uploading ? '…' : t('profile.changeAvatar', lang)}
+          </button>
+          {avatarUrl && (
+            <button
+              type="button"
+              onClick={() => setAvatarUrl(null)}
+              className="rounded-full border-2 border-ink/40 px-4 py-2 text-sm font-bold text-ink/70"
+            >
+              {t('profile.removeAvatar', lang)}
+            </button>
+          )}
+        </div>
+      </div>
+
+      <label className="mb-2 mt-3 block text-xs font-bold uppercase tracking-wider text-ink/60">
+        {t('profile.name', lang)}
+      </label>
+      <input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        maxLength={80}
+        className="w-full rounded-xl border-2 border-ink bg-paper px-3 py-2 text-base focus:outline-none"
+      />
+
+      <label className="mb-2 mt-4 block text-xs font-bold uppercase tracking-wider text-ink/60">
+        {t('profile.bio', lang)}
+      </label>
+      <textarea
+        value={bio}
+        onChange={(e) => setBio(e.target.value)}
+        maxLength={500}
+        rows={3}
+        className="w-full resize-none rounded-xl border-2 border-ink bg-paper px-3 py-2 text-base focus:outline-none"
+      />
+
+      <label className="mb-2 mt-4 block text-xs font-bold uppercase tracking-wider text-ink/60">
+        {t('profile.phone', lang)}
+      </label>
+      <input
+        value={phone}
+        onChange={(e) => setPhone(e.target.value)}
+        maxLength={32}
+        className="w-full rounded-xl border-2 border-ink bg-paper px-3 py-2 text-base focus:outline-none"
+      />
+
+      <div className="mt-4 mb-2 flex items-center justify-between">
+        <span className="text-xs font-bold uppercase tracking-wider text-ink/60">
+          {t('profile.links', lang)}
+        </span>
+        {links.length < 10 && (
+          <button
+            type="button"
+            onClick={addLink}
+            className="text-sm font-bold underline"
+          >
+            + {t('profile.addLink', lang)}
+          </button>
+        )}
+      </div>
+      <div className="flex flex-col gap-2">
+        {links.map((ln, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <input
+              value={ln}
+              onChange={(e) => setLink(i, e.target.value)}
+              placeholder="https://..."
+              className="flex-1 rounded-xl border-2 border-ink bg-paper px-3 py-2 text-base focus:outline-none"
+            />
+            <button
+              type="button"
+              onClick={() => removeLink(i)}
+              className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-ink"
+              aria-label="remove"
+            >
+              ×
+            </button>
+          </div>
+        ))}
+      </div>
+
+      <button
+        type="button"
+        onClick={() => void onSave()}
+        disabled={busy}
+        className="mt-6 w-full rounded-full border-2 border-ink bg-ink py-3 font-black text-paper disabled:opacity-50"
+      >
+        {busy ? '…' : t('common.save', lang)}
+      </button>
+      {msg && <p className="mt-3 text-center text-sm">{msg}</p>}
+    </div>
+  )
+}
+
 function BatterySection() {
   const { state, setPrefs } = useApp()
   const lang = state.lang

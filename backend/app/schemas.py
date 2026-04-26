@@ -44,6 +44,8 @@ class UserOut(BaseModel):
     bio: str = ""
     kind: str = "user"
     phone: str = ""
+    avatarUrl: str | None = None
+    links: list[str] = []
     lastSeen: int | None = None
     isContact: bool = False
     blocked: bool = False
@@ -56,6 +58,8 @@ class UserUpdateIn(BaseModel):
     name: str | None = None
     bio: str | None = None
     phone: str | None = None
+    avatarUrl: str | None = Field(default=None, max_length=500)
+    links: list[str] | None = Field(default=None, max_length=10)
 
 
 class ReactionAggOut(BaseModel):
@@ -105,6 +109,9 @@ class ChatOut(BaseModel):
     title: str
     description: str = ""
     isPublic: bool = False
+    slowModeSeconds: int = 0
+    subscribersOnly: bool = False
+    signedPosts: bool = False
     createdBy: str | None = None
     participants: list[str]
     pinned: bool = False
@@ -127,6 +134,9 @@ class ChatPatch(BaseModel):
     title: str | None = None
     description: str | None = None
     isPublic: bool | None = None
+    slowModeSeconds: int | None = Field(default=None, ge=0, le=3600)
+    subscribersOnly: bool | None = None
+    signedPosts: bool | None = None
 
 
 class ChatMemberOut(BaseModel):

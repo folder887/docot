@@ -50,6 +50,8 @@ export type ApiUser = {
   bio: string
   kind: 'user' | 'bot' | 'channel' | 'group'
   phone: string
+  avatarUrl: string | null
+  links: string[]
   lastSeen: number | null
   isContact: boolean
   blocked: boolean
@@ -102,6 +104,9 @@ export type ApiChat = {
   title: string
   description?: string
   isPublic?: boolean
+  slowModeSeconds?: number
+  subscribersOnly?: boolean
+  signedPosts?: boolean
   createdBy?: string
   participants: string[]
   pinned: boolean
@@ -201,7 +206,13 @@ export const api = {
       body: JSON.stringify({ handle, password }),
     }),
   me: () => request<ApiUser>('/auth/me'),
-  updateMe: (patch: { name?: string; bio?: string; phone?: string }) =>
+  updateMe: (patch: {
+    name?: string
+    bio?: string
+    phone?: string
+    avatarUrl?: string | null
+    links?: string[]
+  }) =>
     request<ApiUser>('/users/me', { method: 'PATCH', body: JSON.stringify(patch) }),
 
   // QR pairing — logged-in device generates a token, new device claims it.
@@ -237,7 +248,17 @@ export const api = {
     isPublic?: boolean
     participantIds: string[]
   }) => request<ApiChat>('/chats', { method: 'POST', body: JSON.stringify(body) }),
-  patchChat: (chatId: string, patch: { title?: string; description?: string; isPublic?: boolean }) =>
+  patchChat: (
+    chatId: string,
+    patch: {
+      title?: string
+      description?: string
+      isPublic?: boolean
+      slowModeSeconds?: number
+      subscribersOnly?: boolean
+      signedPosts?: boolean
+    },
+  ) =>
     request<ApiChat>(`/chats/${encodeURIComponent(chatId)}`, {
       method: 'PATCH',
       body: JSON.stringify(patch),
@@ -401,6 +422,10 @@ export const api = {
     request<ApiKeyBundle>(
       `/keys/bundle/${encodeURIComponent(userId)}/${deviceId}`,
     ),
+
+  // bot creation
+  createBot: (body: { handle: string; name: string }) =>
+    request<ApiUser>('/users/bots', { method: 'POST', body: JSON.stringify(body) }),
 
   // uploads
   uploadFile: async (file: Blob, filename = 'file'): Promise<ApiUpload> => {

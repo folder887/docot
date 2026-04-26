@@ -116,6 +116,9 @@ def _chat_out(db: Session, chat: Chat, me_id: str, with_history: bool = False) -
         title=title or "Chat",
         description=getattr(chat, "description", "") or "",
         isPublic=bool(getattr(chat, "is_public", False)),
+        slowModeSeconds=int(getattr(chat, "slow_mode_seconds", 0) or 0),
+        subscribersOnly=bool(getattr(chat, "subscribers_only", False)),
+        signedPosts=bool(getattr(chat, "signed_posts", False)),
         createdBy=chat.created_by,
         participants=members,
         pinned=bool(membership and membership.pinned),
@@ -234,14 +237,42 @@ async def post_message(
     db: Session = Depends(get_db),
 ) -> MessageOut:
     chat = _require_member(db, chat_id, me.id)
-    if chat.kind == "channel":
-        mem = (
-            db.query(ChatMember)
-            .filter(ChatMember.chat_id == chat.id, ChatMember.user_id == me.id)
+    mem = (
+        db.query(ChatMember)
+        .filter(ChatMember.chat_id == chat.id, ChatMember.user_id == me.id)
+        .first()
+    )
+    is_admin = bool(mem and mem.role in ("owner", "admin"))
+    if chat.kind == "channel" and not is_admin:
+        raise HTTPException(status_code=403, detail="Only admins can post in channels")
+    if (
+        chat.kind == "group"
+        and bool(getattr(chat, "subscribers_only", False))
+        and not is_admin
+    ):
+        raise HTTPException(status_code=403, detail="Only admins can post (subscribers-only)")
+    slow = int(getattr(chat, "slow_mode_seconds", 0) or 0)
+    if slow > 0 and not is_admin:
+        # Cheapest enforcement: look at the user's most recent post and
+        # reject if it's within the slow-mode window.
+        last_msg = (
+            db.query(Message)
+            .filter(
+                Message.chat_id == chat.id,
+                Message.author_id == me.id,
+                Message.deleted_at.is_(None),
+            )
+            .order_by(Message.created_at.desc())
             .first()
         )
-        if not mem or mem.role not in ("owner", "admin"):
-            raise HTTPException(status_code=403, detail="Only admins can post in channels")
+        if last_msg is not None:
+            elapsed_ms = now_ms() - int(last_msg.created_at or 0)
+            if elapsed_ms < slow * 1000:
+                wait_s = max(1, (slow * 1000 - elapsed_ms) // 1000)
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Slow mode: wait {wait_s}s before posting again",
+                )
     reply_to_id = None
     if body.replyToId:
         ref = db.get(Message, body.replyToId)
@@ -417,6 +448,12 @@ def update_chat(
         chat.description = body.description[:1000]
     if body.isPublic is not None:
         chat.is_public = bool(body.isPublic)
+    if body.slowModeSeconds is not None:
+        chat.slow_mode_seconds = int(body.slowModeSeconds)
+    if body.subscribersOnly is not None:
+        chat.subscribers_only = bool(body.subscribersOnly)
+    if body.signedPosts is not None:
+        chat.signed_posts = bool(body.signedPosts)
     chat.updated_at = now_ms()
     db.commit()
     db.refresh(chat)

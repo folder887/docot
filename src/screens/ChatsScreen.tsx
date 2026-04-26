@@ -38,6 +38,7 @@ export function ChatsScreen() {
   const [newGroupOpen, setNewGroupOpen] = useState(false)
   const [newGroupKind, setNewGroupKind] = useState<'group' | 'channel'>('group')
   const [foldersOpen, setFoldersOpen] = useState(false)
+  const [newBotOpen, setNewBotOpen] = useState(false)
   const [globalResults, setGlobalResults] = useState<User[]>([])
   const [searching, setSearching] = useState(false)
 
@@ -130,6 +131,11 @@ export function ChatsScreen() {
                   },
                 },
                 {
+                  label: t('chats.newBot', state.lang),
+                  icon: <IconUser size={18} />,
+                  onClick: () => setNewBotOpen(true),
+                },
+                {
                   label: t('settings.folders', state.lang),
                   icon: <IconFolder size={18} />,
                   onClick: () => setFoldersOpen(true),
@@ -201,7 +207,70 @@ export function ChatsScreen() {
         />
       )}
       {foldersOpen && <FoldersSheet onClose={() => setFoldersOpen(false)} />}
+      {newBotOpen && <NewBotSheet onClose={() => setNewBotOpen(false)} />}
     </div>
+  )
+}
+
+function NewBotSheet({ onClose }: { onClose: () => void }) {
+  const { state, refresh } = useApp()
+  const navigate = useNavigate()
+  const [name, setName] = useState('')
+  const [handle, setHandle] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  const submit = async () => {
+    setBusy(true)
+    setErr(null)
+    try {
+      const { api } = await import('../api')
+      const bot = await api.createBot({ name: name.trim(), handle: handle.trim() })
+      await refresh()
+      onClose()
+      navigate(`/profile/${bot.id}`)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Modal open onClose={onClose} title={t('chats.newBot', state.lang)}>
+      <form
+        className="flex flex-col gap-3"
+        onSubmit={(e) => {
+          e.preventDefault()
+          void submit()
+        }}
+      >
+        <input
+          className="bw-input"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder={t('profile.name', state.lang)}
+          maxLength={80}
+          required
+        />
+        <input
+          className="bw-input"
+          value={handle}
+          onChange={(e) => setHandle(e.target.value)}
+          placeholder="my_bot"
+          maxLength={32}
+          required
+        />
+        {err && <p className="text-sm text-red-600">{err}</p>}
+        <div className="flex gap-3">
+          <button type="button" className="bw-btn-ghost flex-1" onClick={onClose}>
+            {t('common.cancel', state.lang)}
+          </button>
+          <button type="submit" className="bw-btn-primary flex-1" disabled={busy}>
+            {busy ? '…' : t('common.save', state.lang)}
+          </button>
+        </div>
+      </form>
+    </Modal>
   )
 }
 

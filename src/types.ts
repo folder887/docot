@@ -26,6 +26,8 @@ export type User = {
   blocked?: boolean
   isContact?: boolean
   phone?: string
+  avatarUrl?: string | null
+  links?: string[]
 }
 
 export type ReactionAgg = {
@@ -57,6 +59,9 @@ export type Chat = {
   kind: 'dm' | 'group' | 'channel' | 'saved'
   description?: string
   isPublic?: boolean
+  slowModeSeconds?: number
+  subscribersOnly?: boolean
+  signedPosts?: boolean
   createdBy?: string
   participants: string[]
   messages: Message[]

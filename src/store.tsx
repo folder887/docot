@@ -100,7 +100,13 @@ type Ctx = {
   renameFolder: (id: string, name: string) => Promise<void>
   setFolderChats: (id: string, chatIds: string[]) => Promise<void>
   deleteFolder: (id: string) => Promise<void>
-  updateMe: (patch: { name?: string; bio?: string; phone?: string }) => Promise<void>
+  updateMe: (patch: {
+    name?: string
+    bio?: string
+    phone?: string
+    avatarUrl?: string | null
+    links?: string[]
+  }) => Promise<void>
   loadUser: (id: string) => Promise<User | null>
   userById: (id: string) => User | null
   peerOf: (chat: Chat) => User | null
@@ -130,6 +136,8 @@ function userFromApi(u: ApiUser): User {
   return {
     id: u.id,
     name: u.name,
+    avatarUrl: u.avatarUrl ?? null,
+    links: Array.isArray(u.links) ? u.links : [],
     handle: u.handle,
     bio: u.bio,
     kind: u.kind,
@@ -271,6 +279,9 @@ function chatFromApi(c: ApiChat, meId?: string): Chat {
     title: c.title,
     description: c.description ?? '',
     isPublic: !!c.isPublic,
+    slowModeSeconds: c.slowModeSeconds ?? 0,
+    subscribersOnly: !!c.subscribersOnly,
+    signedPosts: !!c.signedPosts,
     createdBy: c.createdBy,
     participants: c.participants,
     messages: c.messages.map((m) => fixSealed(msgFromApi(m))),
@@ -1036,7 +1047,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const updateMe = useCallback(
-    async (patch: { name?: string; bio?: string; phone?: string }) => {
+    async (patch: {
+      name?: string
+      bio?: string
+      phone?: string
+      avatarUrl?: string | null
+      links?: string[]
+    }) => {
       const u = userFromApi(await api.updateMe(patch))
       setState((s) => ({
         ...s,

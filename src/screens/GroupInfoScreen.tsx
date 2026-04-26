@@ -452,18 +452,31 @@ function EditSheet({
   open: boolean
   chat: Chat
   onClose: () => void
-  onSubmit: (patch: { title?: string; description?: string; isPublic?: boolean }) => Promise<void>
+  onSubmit: (patch: {
+    title?: string
+    description?: string
+    isPublic?: boolean
+    slowModeSeconds?: number
+    subscribersOnly?: boolean
+    signedPosts?: boolean
+  }) => Promise<void>
 }) {
   const { state } = useApp()
   const [title, setTitle] = useState(chat.title)
   const [description, setDescription] = useState(chat.description ?? '')
   const [isPublic, setIsPublic] = useState(!!chat.isPublic)
+  const [slowSec, setSlowSec] = useState(chat.slowModeSeconds ?? 0)
+  const [subOnly, setSubOnly] = useState(!!chat.subscribersOnly)
+  const [signed, setSigned] = useState(!!chat.signedPosts)
   useEffect(() => {
     if (!open) return
     queueMicrotask(() => {
       setTitle(chat.title)
       setDescription(chat.description ?? '')
       setIsPublic(!!chat.isPublic)
+      setSlowSec(chat.slowModeSeconds ?? 0)
+      setSubOnly(!!chat.subscribersOnly)
+      setSigned(!!chat.signedPosts)
     })
   }, [open, chat])
   return (
@@ -472,7 +485,14 @@ function EditSheet({
         className="flex flex-col gap-3"
         onSubmit={(e) => {
           e.preventDefault()
-          void onSubmit({ title, description, isPublic })
+          void onSubmit({
+            title,
+            description,
+            isPublic,
+            slowModeSeconds: slowSec,
+            subscribersOnly: subOnly,
+            signedPosts: signed,
+          })
         }}
       >
         <input
@@ -498,6 +518,40 @@ function EditSheet({
             checked={isPublic}
             onChange={(e) => setIsPublic(e.target.checked)}
             className="h-5 w-5 accent-ink"
+          />
+        </label>
+        {chat.kind === 'group' && (
+          <label className="row-press flex items-center justify-between rounded-2xl border border-line px-3 py-2">
+            <span className="text-sm font-bold">{t('channel.subscribersOnly', state.lang)}</span>
+            <input
+              type="checkbox"
+              checked={subOnly}
+              onChange={(e) => setSubOnly(e.target.checked)}
+              className="h-5 w-5 accent-ink"
+            />
+          </label>
+        )}
+        {chat.kind === 'channel' && (
+          <label className="row-press flex items-center justify-between rounded-2xl border border-line px-3 py-2">
+            <span className="text-sm font-bold">{t('channel.signedPosts', state.lang)}</span>
+            <input
+              type="checkbox"
+              checked={signed}
+              onChange={(e) => setSigned(e.target.checked)}
+              className="h-5 w-5 accent-ink"
+            />
+          </label>
+        )}
+        <label className="flex flex-col gap-1 rounded-2xl border border-line px-3 py-2">
+          <span className="text-sm font-bold">{t('channel.slowMode', state.lang)}</span>
+          <input
+            type="number"
+            min={0}
+            max={3600}
+            step={5}
+            value={slowSec}
+            onChange={(e) => setSlowSec(Math.max(0, Math.min(3600, Number(e.target.value) || 0)))}
+            className="bw-input"
           />
         </label>
         <div className="flex gap-3">

@@ -298,6 +298,17 @@ const DICT: Dict = {
   'note.title.placeholder': { en: 'Note title', ru: 'Название заметки' },
   'common.save': { en: 'Save', ru: 'Сохранить' },
   'search.placeholder': { en: 'Search…', ru: 'Поиск…' },
+  'settings.editProfile': { en: 'Edit profile', ru: 'Редактировать профиль' },
+  'settings.saved': { en: 'Saved', ru: 'Сохранено' },
+  'profile.name': { en: 'Name', ru: 'Имя' },
+  'profile.links': { en: 'Links', ru: 'Ссылки' },
+  'profile.addLink': { en: 'Add link', ru: 'Добавить ссылку' },
+  'profile.changeAvatar': { en: 'Change avatar', ru: 'Изменить аватар' },
+  'profile.removeAvatar': { en: 'Remove', ru: 'Удалить' },
+  'channel.slowMode': { en: 'Slow mode (seconds)', ru: 'Медленный режим (сек)' },
+  'channel.subscribersOnly': { en: 'Admins only post', ru: 'Постят только админы' },
+  'channel.signedPosts': { en: 'Signed posts', ru: 'Подписывать посты' },
+  'channel.settings': { en: 'Channel settings', ru: 'Настройки канала' },
 }
 
 export function t(key: string, lang: Lang): string {

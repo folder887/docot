@@ -134,7 +134,7 @@ export function ProfileScreen() {
       />
 
       <div className="flex flex-col items-center gap-2 px-6 py-6">
-        <Avatar name={user.name} size={112} filled={!isMe} />
+        <Avatar name={user.name} size={112} filled={!isMe} src={user.avatarUrl} />
         <div className="mt-3 text-center">
           <h1 className="italic-display text-2xl">{user.name}</h1>
           <p className="mt-1 text-sm text-muted">{subtitle}</p>
@@ -403,7 +403,7 @@ function CallScreen({
     >
       <div className="flex flex-col items-center gap-2 pt-8">
         <div className="text-xs uppercase tracking-[0.3em] opacity-70">{t('call.title', lang)}</div>
-        <Avatar name={user.name} size={140} filled={false} />
+        <Avatar name={user.name} size={140} filled={false} src={user.avatarUrl} />
         <div className="italic-display mt-4 text-3xl">{user.name}</div>
         <div className="font-mono text-lg opacity-80">{mm}:{ss}</div>
         <div className="mt-2 max-w-[260px] text-center text-xs opacity-60">

@@ -14,6 +14,9 @@ router = APIRouter(prefix="/users", tags=["users"])
 
 def _out(u: User, me_contacts: dict[str, Contact] | None = None) -> UserOut:
     info = me_contacts.get(u.id) if me_contacts else None
+    raw_links = (getattr(u, "links", "") or "").split("\n")
+    links = [ln.strip() for ln in raw_links if ln and ln.strip()]
+    avatar_url = getattr(u, "avatar_url", "") or None
     return UserOut(
         id=u.id,
         handle=u.handle,
@@ -21,6 +24,8 @@ def _out(u: User, me_contacts: dict[str, Contact] | None = None) -> UserOut:
         bio=u.bio,
         kind=u.kind,
         phone=u.phone,
+        avatarUrl=avatar_url,
+        links=links,
         lastSeen=u.last_seen_at,
         isContact=bool(info),
         blocked=bool(info and info.blocked),
@@ -93,6 +98,18 @@ def update_me(
         me.bio = body.bio
     if body.phone is not None:
         me.phone = body.phone
+    if body.avatarUrl is not None:
+        me.avatar_url = body.avatarUrl.strip()
+    if body.links is not None:
+        cleaned = [ln.strip() for ln in body.links if ln and ln.strip()]
+        # Validate each link is an absolute http(s) URL — keeps the API from
+        # storing arbitrary text and prevents javascript: scheme abuse.
+        for ln in cleaned:
+            if not (ln.startswith("http://") or ln.startswith("https://")):
+                raise HTTPException(status_code=400, detail=f"Invalid link: {ln}")
+            if len(ln) > 300:
+                raise HTTPException(status_code=400, detail="Link too long")
+        me.links = "\n".join(cleaned)
     db.add(me)
     db.commit()
     db.refresh(me)
@@ -198,3 +215,48 @@ def list_contacts(
         .all()
     )
     return [_out(u, {u.id: c}) for c, u in rows]
+
+
+# --- Bot creation -----------------------------------------------------------
+import re as _re
+
+from pydantic import BaseModel, Field
+
+from ..auth import hash_password
+
+
+class BotCreateIn(BaseModel):
+    handle: str = Field(min_length=3, max_length=32)
+    name: str = Field(min_length=1, max_length=80)
+
+
+_HANDLE_RE = _re.compile(r"^[A-Za-z0-9_]+$")
+
+
+@router.post("/bots", response_model=UserOut)
+def create_bot(
+    body: BotCreateIn,
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> UserOut:
+    raw = body.handle.strip().lstrip("@")
+    if not _HANDLE_RE.match(raw):
+        raise HTTPException(status_code=400, detail="Bot handle must be ASCII letters/digits/underscore")
+    handle = raw if raw.lower().endswith("bot") else f"{raw}_bot"
+    if db.query(User).filter(User.handle == handle).first():
+        raise HTTPException(status_code=409, detail="Bot handle already taken")
+    bot = User(
+        handle=handle,
+        name=body.name.strip(),
+        password_hash=hash_password("!bot-no-login"),
+        kind="bot",
+        bot_owner_id=me.id,
+    )
+    db.add(bot)
+    db.flush()
+    # Owner becomes a "contact" of the bot so it shows up in contacts.
+    own = Contact(owner_id=me.id, contact_id=bot.id, blocked=False)
+    db.add(own)
+    db.commit()
+    db.refresh(bot)
+    return _out(bot, {bot.id: own})

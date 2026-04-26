@@ -32,6 +32,13 @@ class User(Base):
     bio: Mapped[str] = mapped_column(Text, default="")
     kind: Mapped[str] = mapped_column(String(16), default="user")
     phone: Mapped[str] = mapped_column(String(32), default="")
+    avatar_url: Mapped[str] = mapped_column(String(500), default="")
+    # Links serialised as newline-separated URLs to avoid a 1:N table for
+    # what is effectively a single short list per user.
+    links: Mapped[str] = mapped_column(Text, default="")
+    # For kind=bot users: id of the human owner who created the bot. Empty
+    # for human accounts.
+    bot_owner_id: Mapped[str] = mapped_column(String, default="")
     created_at: Mapped[int] = mapped_column(Integer, default=now_ms)
     last_seen_at: Mapped[int] = mapped_column(Integer, default=now_ms)
 
@@ -46,10 +53,14 @@ class Chat(Base):
     title: Mapped[str] = mapped_column(String(120), default="")
     description: Mapped[str] = mapped_column(Text, default="")
     is_public: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Admin extras for channels/groups: rate-limit between sends, restrict
+    # posting to admins, and auto-tag posts with author. All zero for DMs.
+    slow_mode_seconds: Mapped[int] = mapped_column(Integer, default=0)
+    subscribers_only: Mapped[bool] = mapped_column(Boolean, default=False)
+    signed_posts: Mapped[bool] = mapped_column(Boolean, default=False)
     created_by: Mapped[str] = mapped_column(String, ForeignKey("users.id"))
     created_at: Mapped[int] = mapped_column(Integer, default=now_ms)
     updated_at: Mapped[int] = mapped_column(Integer, default=now_ms)
-    pinned_by_creator: Mapped[bool] = mapped_column(Boolean, default=False)
 
     members: Mapped[list[ChatMember]] = relationship(back_populates="chat", cascade="all, delete-orphan")
     messages: Mapped[list[Message]] = relationship(back_populates="chat", cascade="all, delete-orphan")
