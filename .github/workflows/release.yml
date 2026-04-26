@@ -115,10 +115,14 @@ jobs:
           merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
+          # Tauri's upload-artifact preserves the nested
+          # `bundle/<format>/...` directory structure, so we need a recursive
+          # glob here. The Android APK is uploaded with a flat glob and lands
+          # at the artifacts root.
           files: |
-            artifacts/*.AppImage
-            artifacts/*.deb
-            artifacts/*.exe
-            artifacts/*.dmg
-            artifacts/*.apk
+            artifacts/**/*.AppImage
+            artifacts/**/*.deb
+            artifacts/**/*.exe
+            artifacts/**/*.dmg
+            artifacts/**/*.apk
           generate_release_notes: true
