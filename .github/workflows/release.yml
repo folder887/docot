@@ -52,7 +52,17 @@ jobs:
       - name: Tauri build
         env:
           APPIMAGE_EXTRACT_AND_RUN: '1'
-        run: npx tauri build --bundles ${{ matrix.bundles }}
+        # Retry once on flaky network failures — the Linux AppImage build
+        # downloads AppRun and linuxdeploy from GitHub releases which has
+        # occasional 5xx blips that fail the whole job.
+        run: |
+          for i in 1 2 3; do
+            npx tauri build --bundles ${{ matrix.bundles }} && exit 0
+            echo "Tauri build attempt $i failed, retrying in 15s..."
+            sleep 15
+          done
+          exit 1
+        shell: bash
 
       - uses: actions/upload-artifact@v4
         with:
