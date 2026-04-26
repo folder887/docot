@@ -18,7 +18,9 @@ android/app/release/
 android/local.properties
 android/captures/
 android/.idea/
-android/gradle/wrapper/gradle-wrapper.jar
+# gradle-wrapper.jar is intentionally tracked so CI runners can build the
+# Android APK without an extra `gradle wrapper` bootstrap step.
+# android/gradle/wrapper/gradle-wrapper.jar
 
 # iOS
 ios/App/build/
