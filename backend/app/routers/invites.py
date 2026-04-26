@@ -40,7 +40,7 @@ def _to_out(inv: ChatInvite) -> InviteOut:
 def _is_active(inv: ChatInvite) -> bool:
     if inv.revoked:
         return False
-    if inv.expires_at and inv.expires_at < now_ms():
+    if inv.expires_at is not None and inv.expires_at < now_ms():
         return False
     if inv.max_uses is not None and inv.uses >= inv.max_uses:
         return False
@@ -175,6 +175,8 @@ def join_via_invite(
         )
         if inv.max_uses is not None:
             stmt = stmt.where(ChatInvite.uses < inv.max_uses)
+        if inv.expires_at is not None:
+            stmt = stmt.where(ChatInvite.expires_at >= now_ms())
         result = db.execute(stmt)
         if result.rowcount == 0:
             db.rollback()
