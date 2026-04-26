@@ -171,6 +171,15 @@ export type ApiEvent = {
   note: string
 }
 
+export type ApiEventRef = {
+  kind: 'note' | 'post' | 'message'
+  id: string
+  title: string
+  snippet: string
+  chatId: string
+  createdAt: number
+}
+
 export type ApiPost = {
   id: string
   authorId: string
@@ -413,6 +422,15 @@ export const api = {
     }),
   deleteEvent: (id: string) =>
     request<{ ok: boolean }>(`/events/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  eventRefs: (id: string) =>
+    request<{
+      eventId: string
+      notes: ApiEventRef[]
+      posts: ApiEventRef[]
+      messages: ApiEventRef[]
+    }>(`/events/${encodeURIComponent(id)}/refs`),
+  listNoteTags: () => request<{ tag: string; count: number }[]>('/notes/tags'),
+  listNoteBacklinks: (id: string) => request<ApiNote[]>(`/notes/${encodeURIComponent(id)}/backlinks`),
 
   // posts
   listPosts: (params: { community?: string; sort?: SortBy; limit?: number } = {}) => {

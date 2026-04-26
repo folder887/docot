@@ -12,19 +12,29 @@ export function NotesScreen() {
   const [query, setQuery] = useState('')
   const [mode, setMode] = useState<'list' | 'graph'>('list')
   const [creating, setCreating] = useState(false)
+  const [activeTag, setActiveTag] = useState<string | null>(null)
+
+  const tagCounts = useMemo(() => {
+    const m = new Map<string, number>()
+    state.notes.forEach((n) => {
+      n.tags.forEach((tag) => m.set(tag, (m.get(tag) ?? 0) + 1))
+    })
+    return Array.from(m.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+  }, [state.notes])
 
   const notes = useMemo(() => {
     const q = query.trim().toLowerCase()
     return [...state.notes]
       .filter(
         (n) =>
-          !q ||
-          n.title.toLowerCase().includes(q) ||
-          n.body.toLowerCase().includes(q) ||
-          n.tags.some((tag) => tag.toLowerCase().includes(q)),
+          (!activeTag || n.tags.includes(activeTag)) &&
+          (!q ||
+            n.title.toLowerCase().includes(q) ||
+            n.body.toLowerCase().includes(q) ||
+            n.tags.some((tag) => tag.toLowerCase().includes(q))),
       )
       .sort((a, b) => b.updatedAt - a.updatedAt)
-  }, [state.notes, query])
+  }, [state.notes, query, activeTag])
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-paper">
@@ -66,6 +76,31 @@ export function NotesScreen() {
             {t('notes.graph', state.lang)}
           </ModeBtn>
         </div>
+        {tagCounts.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              className={`rounded-full border-2 border-ink px-2.5 py-0.5 text-[11px] font-bold ${
+                activeTag === null ? 'bg-ink text-paper' : 'bg-paper text-ink'
+              }`}
+              onClick={() => setActiveTag(null)}
+            >
+              {t('notes.allTags', state.lang)}
+            </button>
+            {tagCounts.map(([tag, count]) => (
+              <button
+                key={tag}
+                type="button"
+                className={`rounded-full border-2 border-ink px-2.5 py-0.5 text-[11px] font-bold ${
+                  activeTag === tag ? 'bg-ink text-paper' : 'bg-paper text-ink'
+                }`}
+                onClick={() => setActiveTag(tag === activeTag ? null : tag)}
+              >
+                #{tag} <span className="opacity-60">{count}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {mode === 'list' ? (

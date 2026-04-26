@@ -22,6 +22,43 @@ def _out(n: Note) -> NoteOut:
     )
 
 
+@router.get("/tags", response_model=list[dict])
+def list_tags(me: User = Depends(current_user), db: Session = Depends(get_db)) -> list[dict]:
+    """Aggregate distinct tags across the caller's notes with usage counts."""
+    rows = db.query(Note.tags).filter(Note.owner_id == me.id).all()
+    counts: dict[str, int] = {}
+    for (tags,) in rows:
+        for t in (tags or "").split(","):
+            t = t.strip()
+            if not t:
+                continue
+            counts[t] = counts.get(t, 0) + 1
+    return [{"tag": k, "count": v} for k, v in sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))]
+
+
+@router.get("/{note_id}/backlinks", response_model=list[NoteOut])
+def list_backlinks(
+    note_id: str,
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> list[NoteOut]:
+    """Find every other note (owned by caller) whose body contains
+    `[[<title>]]` for this note's title. O(N) scan over the note set;
+    fine for personal note volumes."""
+    target = db.get(Note, note_id)
+    if not target or target.owner_id != me.id:
+        raise HTTPException(status_code=404, detail="Note not found")
+    needle = f"[[{target.title}]]".lower()
+    rows = (
+        db.query(Note)
+        .filter(Note.owner_id == me.id, Note.id != note_id)
+        .all()
+    )
+    out = [n for n in rows if needle in (n.body or "").lower()]
+    out.sort(key=lambda n: n.updated_at, reverse=True)
+    return [_out(n) for n in out]
+
+
 @router.get("", response_model=list[NoteOut])
 def list_notes(me: User = Depends(current_user), db: Session = Depends(get_db)) -> list[NoteOut]:
     rows = db.query(Note).filter(Note.owner_id == me.id).order_by(Note.updated_at.desc()).all()

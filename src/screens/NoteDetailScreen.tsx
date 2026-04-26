@@ -4,7 +4,8 @@ import { useApp } from '../store'
 import { t } from '../i18n'
 import { ScreenHeader } from '../components/ScreenHeader'
 import { IconTrash } from '../components/Icons'
-import { ConfirmDialog } from '../components/Modal'
+import { ConfirmDialog, Modal } from '../components/Modal'
+import { EventChip } from '../components/EventChip'
 import type { Note } from '../types'
 
 export function NoteDetailScreen() {
@@ -29,6 +30,7 @@ function NoteEditor({ note }: { note: Note }) {
   const [title, setTitle] = useState(note.title)
   const [body, setBody] = useState(note.body)
   const [confirmDel, setConfirmDel] = useState(false)
+  const [eventPickerOpen, setEventPickerOpen] = useState(false)
 
   const backlinks = useMemo(() => {
     const needle = note.title.toLowerCase()
@@ -95,12 +97,54 @@ function NoteEditor({ note }: { note: Note }) {
               onChange={(e) => setTitle(e.target.value)}
               placeholder={t('notes.title', state.lang)}
             />
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="rounded-full border-2 border-ink bg-paper px-3 py-1 text-xs font-bold transition-transform active:scale-95"
+                onClick={() => setEventPickerOpen(true)}
+              >
+                📅 {t('event.insert', state.lang)}
+              </button>
+            </div>
             <textarea
               className="bw-input min-h-[300px] font-mono text-sm leading-relaxed"
               value={body}
               onChange={(e) => setBody(e.target.value)}
               placeholder={t('notes.body', state.lang)}
             />
+            <Modal
+              open={eventPickerOpen}
+              onClose={() => setEventPickerOpen(false)}
+              title={t('event.insert', state.lang)}
+              align="center"
+            >
+              <div className="flex max-h-[60vh] flex-col gap-2 overflow-y-auto">
+                {state.events.length === 0 ? (
+                  <p className="text-sm text-muted">{t('calendar.none', state.lang)}</p>
+                ) : (
+                  state.events
+                    .slice()
+                    .sort((a, b) => (b.date + (b.start ?? '')).localeCompare(a.date + (a.start ?? '')))
+                    .map((ev) => (
+                      <button
+                        key={ev.id}
+                        type="button"
+                        className="flex flex-col items-start gap-0.5 rounded-xl border-2 border-ink px-3 py-2 text-left transition-colors hover:bg-ink/5"
+                        onClick={() => {
+                          setBody((b) => (b.endsWith('\n') || b === '' ? b : b + ' ') + `[[event:${ev.id}]] `)
+                          setEventPickerOpen(false)
+                        }}
+                      >
+                        <div className="font-bold">{ev.title}</div>
+                        <div className="text-xs text-muted">
+                          {ev.date}
+                          {ev.start ? ` · ${ev.start}` : ''}
+                        </div>
+                      </button>
+                    ))
+                )}
+              </div>
+            </Modal>
           </>
         ) : (
           <article className="prose-sm text-sm leading-relaxed">
@@ -182,6 +226,11 @@ function renderInline(text: string, titleToId: Map<string, string>): React.React
   while ((match = regex.exec(text)) !== null) {
     if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index))
     const linkText = match[1]
+    if (linkText.startsWith('event:')) {
+      parts.push(<EventChip key={key++} eventId={linkText.slice('event:'.length)} />)
+      lastIndex = match.index + match[0].length
+      continue
+    }
     const id = titleToId.get(linkText.toLowerCase())
     if (id) {
       parts.push(

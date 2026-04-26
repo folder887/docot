@@ -1,7 +1,10 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useApp } from '../store'
 import { t } from '../i18n'
 import { IconPlus, IconTrash } from '../components/Icons'
+import { Modal } from '../components/Modal'
+import { api, type ApiEventRef } from '../api'
 import type { CalendarEvent } from '../types'
 
 function pad(n: number) {
@@ -29,6 +32,7 @@ export function CalendarScreen() {
   const [cursor, setCursor] = useState(() => new Date())
   const [selected, setSelected] = useState(() => new Date())
   const [editing, setEditing] = useState<CalendarEvent | null>(null)
+  const [refsFor, setRefsFor] = useState<CalendarEvent | null>(null)
   const [composerOpen, setComposerOpen] = useState(false)
 
   const monthDays = useMemo(() => {
@@ -166,6 +170,14 @@ export function CalendarScreen() {
               </div>
               <div className="flex gap-1">
                 <button
+                  aria-label={t('notes.refs.title', state.lang)}
+                  className="rounded-full border-2 border-black px-2 py-1 text-xs font-bold"
+                  onClick={() => setRefsFor(ev)}
+                  title={t('notes.refs.title', state.lang)}
+                >
+                  🔗
+                </button>
+                <button
                   className="rounded-full border-2 border-black px-2 py-1 text-xs font-bold"
                   onClick={() => {
                     setEditing(ev)
@@ -198,7 +210,104 @@ export function CalendarScreen() {
           }}
         />
       )}
+      <EventRefsModal event={refsFor} onClose={() => setRefsFor(null)} />
     </div>
+  )
+}
+
+function EventRefsModal({
+  event,
+  onClose,
+}: {
+  event: CalendarEvent | null
+  onClose: () => void
+}) {
+  const { state } = useApp()
+  const navigate = useNavigate()
+  const [refs, setRefs] = useState<{
+    notes: ApiEventRef[]
+    posts: ApiEventRef[]
+    messages: ApiEventRef[]
+  } | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!event) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setRefs(null)
+      return
+    }
+    setLoading(true)
+    void api
+      .eventRefs(event.id)
+      .then((r) => setRefs({ notes: r.notes, posts: r.posts, messages: r.messages }))
+      .catch(() => setRefs({ notes: [], posts: [], messages: [] }))
+      .finally(() => setLoading(false))
+  }, [event])
+
+  const total = refs ? refs.notes.length + refs.posts.length + refs.messages.length : 0
+
+  return (
+    <Modal
+      open={!!event}
+      onClose={onClose}
+      title={event ? `${t('notes.refs.title', state.lang)}: ${event.title}` : ''}
+      align="center"
+    >
+      {loading ? (
+        <p className="py-8 text-center text-sm text-muted">…</p>
+      ) : total === 0 ? (
+        <p className="py-8 text-center text-sm text-muted">{t('notes.refs.empty', state.lang)}</p>
+      ) : (
+        <div className="flex max-h-[60vh] flex-col gap-3 overflow-y-auto">
+          {refs!.notes.length > 0 && (
+            <RefSection title={t('tab.notes', state.lang)} items={refs!.notes}>
+              {(r) => navigate(`/notes/${r.id}`)}
+            </RefSection>
+          )}
+          {refs!.posts.length > 0 && (
+            <RefSection title={t('tab.news', state.lang)} items={refs!.posts}>
+              {() => navigate('/news')}
+            </RefSection>
+          )}
+          {refs!.messages.length > 0 && (
+            <RefSection title={t('tab.chats', state.lang)} items={refs!.messages}>
+              {(r) => (r.chatId ? navigate(`/chats/${r.chatId}`) : void 0)}
+            </RefSection>
+          )}
+        </div>
+      )}
+    </Modal>
+  )
+}
+
+function RefSection({
+  title,
+  items,
+  children,
+}: {
+  title: string
+  items: ApiEventRef[]
+  children: (r: ApiEventRef) => void
+}) {
+  return (
+    <section>
+      <div className="mb-1 text-[11px] font-black uppercase tracking-wide text-muted">{title}</div>
+      <ul className="flex flex-col gap-1">
+        {items.map((r) => (
+          <li key={`${r.kind}:${r.id}`}>
+            <button
+              type="button"
+              className="row-press flex w-full flex-col items-start gap-0.5 rounded-xl border-2 border-ink px-3 py-2 text-left"
+              onClick={() => children(r)}
+            >
+              {r.title && <div className="font-bold">{r.title}</div>}
+              <div className="line-clamp-2 text-xs text-muted">{r.snippet}</div>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
   )
 }
 
