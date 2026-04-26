@@ -40,6 +40,8 @@ _MIGRATIONS: list[tuple[str, str, str]] = [
     ("users", "avatar_url", "VARCHAR(500) NOT NULL DEFAULT ''"),
     ("users", "links", "TEXT NOT NULL DEFAULT ''"),
     ("users", "bot_owner_id", "VARCHAR NOT NULL DEFAULT ''"),
+    ("posts", "community_id", "VARCHAR NOT NULL DEFAULT ''"),
+    ("posts", "title", "VARCHAR(300) NOT NULL DEFAULT ''"),
 ]
 
 
@@ -107,6 +109,7 @@ def create_app() -> FastAPI:
     app.include_router(notes.router)
     app.include_router(events.router)
     app.include_router(posts.router)
+    app.include_router(posts.communities_router)
     app.include_router(folders.router)
     app.include_router(invites.router)
     app.include_router(keys.router)

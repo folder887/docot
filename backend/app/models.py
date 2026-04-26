@@ -150,6 +150,73 @@ class Post(Base):
     created_at: Mapped[int] = mapped_column(Integer, default=now_ms, index=True)
     reposts: Mapped[int] = mapped_column(Integer, default=0)
     replies: Mapped[int] = mapped_column(Integer, default=0)
+    # Optional community (subreddit-like) the post belongs to. Empty = global feed.
+    community_id: Mapped[str] = mapped_column(String, default="", index=True)
+    # Optional title for "link"-style posts (Reddit). Empty for X-style posts.
+    title: Mapped[str] = mapped_column(String(300), default="")
+
+
+class Community(Base):
+    """Sub-feed (subreddit-style). Anyone can create one; the creator is the
+    initial moderator. Membership is tracked by `CommunityMember`."""
+    __tablename__ = "communities"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: gen_id("co_"))
+    slug: Mapped[str] = mapped_column(String(40), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(80))
+    description: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"))
+    created_at: Mapped[int] = mapped_column(Integer, default=now_ms)
+
+
+class CommunityMember(Base):
+    __tablename__ = "community_members"
+    __table_args__ = (UniqueConstraint("community_id", "user_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    community_id: Mapped[str] = mapped_column(String, ForeignKey("communities.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    role: Mapped[str] = mapped_column(String(16), default="member")  # member | moderator
+    created_at: Mapped[int] = mapped_column(Integer, default=now_ms)
+
+
+class PostVote(Base):
+    """Reddit-style up/down vote. Replaces the legacy `PostLike` for the
+    feed-vote count: `value` is `+1` (up) or `-1` (down). Each user can
+    have at most one vote per post."""
+    __tablename__ = "post_votes"
+    __table_args__ = (UniqueConstraint("post_id", "user_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    post_id: Mapped[str] = mapped_column(String, ForeignKey("posts.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    value: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[int] = mapped_column(Integer, default=now_ms)
+
+
+class PostComment(Base):
+    """Threaded comments on a post. `parent_id` is empty for top-level
+    comments; otherwise it references another comment on the same post."""
+    __tablename__ = "post_comments"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: gen_id("pc_"))
+    post_id: Mapped[str] = mapped_column(String, ForeignKey("posts.id", ondelete="CASCADE"), index=True)
+    parent_id: Mapped[str] = mapped_column(String, default="", index=True)
+    author_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    text: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[int] = mapped_column(Integer, default=now_ms, index=True)
+    deleted_at: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
+
+
+class PostCommentVote(Base):
+    __tablename__ = "post_comment_votes"
+    __table_args__ = (UniqueConstraint("comment_id", "user_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    comment_id: Mapped[str] = mapped_column(String, ForeignKey("post_comments.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    value: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[int] = mapped_column(Integer, default=now_ms)
 
 
 class PostLike(Base):

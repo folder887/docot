@@ -241,17 +241,64 @@ class PostOut(BaseModel):
     authorId: str
     text: str
     at: int
-    likes: int
+    likes: int  # legacy: equals up-vote count
     reposts: int
-    replies: int
-    liked: bool = False
+    replies: int  # comment count
+    liked: bool = False  # legacy alias for myVote == 1
     reposted: bool = False
     media: list[PostMediaOut] = []
+    communityId: str = ""
+    title: str = ""
+    score: int = 0  # ups - downs
+    ups: int = 0
+    downs: int = 0
+    myVote: int = 0  # -1 / 0 / +1
 
 
 class PostIn(BaseModel):
-    text: str = Field(min_length=0, max_length=1000, default="")
+    text: str = Field(min_length=0, max_length=4000, default="")
+    title: str = Field(default="", max_length=300)
     media: list[PostMediaIn] = []
+    communityId: str = ""
+
+
+class CommunityOut(BaseModel):
+    id: str
+    slug: str
+    name: str
+    description: str
+    createdBy: str
+    createdAt: int
+    members: int
+    joined: bool = False
+    role: str = ""
+
+
+class CommunityIn(BaseModel):
+    slug: str = Field(min_length=2, max_length=40)
+    name: str = Field(min_length=1, max_length=80)
+    description: str = Field(default="", max_length=2000)
+
+
+class PostCommentOut(BaseModel):
+    id: str
+    postId: str
+    parentId: str = ""
+    authorId: str
+    text: str
+    at: int
+    score: int = 0
+    myVote: int = 0
+    deleted: bool = False
+
+
+class PostCommentIn(BaseModel):
+    text: str = Field(min_length=1, max_length=4000)
+    parentId: str = ""
+
+
+class VoteIn(BaseModel):
+    value: int  # -1 / 0 / +1
 
 
 class FolderOut(BaseModel):

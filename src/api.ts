@@ -182,7 +182,39 @@ export type ApiPost = {
   liked: boolean
   reposted: boolean
   media?: ApiPostMedia[]
+  communityId?: string
+  title?: string
+  score?: number
+  ups?: number
+  downs?: number
+  myVote?: -1 | 0 | 1
 }
+
+export type ApiCommunity = {
+  id: string
+  slug: string
+  name: string
+  description: string
+  createdBy: string
+  createdAt: number
+  members: number
+  joined: boolean
+  role: string
+}
+
+export type ApiPostComment = {
+  id: string
+  postId: string
+  parentId: string
+  authorId: string
+  text: string
+  at: number
+  score: number
+  myVote: -1 | 0 | 1
+  deleted: boolean
+}
+
+export type SortBy = 'hot' | 'new' | 'top'
 
 export type ApiFolder = {
   id: string
@@ -383,15 +415,70 @@ export const api = {
     request<{ ok: boolean }>(`/events/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 
   // posts
-  listPosts: () => request<ApiPost[]>('/posts'),
+  listPosts: (params: { community?: string; sort?: SortBy; limit?: number } = {}) => {
+    const qs = new URLSearchParams()
+    if (params.community) qs.set('community', params.community)
+    if (params.sort) qs.set('sort', params.sort)
+    if (params.limit) qs.set('limit', String(params.limit))
+    const s = qs.toString()
+    return request<ApiPost[]>('/posts' + (s ? `?${s}` : ''))
+  },
+  getPost: (id: string) => request<ApiPost>(`/posts/${encodeURIComponent(id)}`),
   listMyPosts: () => request<ApiPost[]>('/posts/mine'),
   listMyReposts: () => request<ApiPost[]>('/posts/reposted'),
-  createPost: (body: { text: string; media?: ApiPostMedia[] }) =>
-    request<ApiPost>('/posts', { method: 'POST', body: JSON.stringify(body) }),
+  createPost: (body: {
+    text: string
+    title?: string
+    media?: ApiPostMedia[]
+    communityId?: string
+  }) => request<ApiPost>('/posts', { method: 'POST', body: JSON.stringify(body) }),
   deletePost: (id: string) =>
     request<{ ok: boolean }>(`/posts/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  likePost: (id: string) => request<ApiPost>(`/posts/${encodeURIComponent(id)}/like`, { method: 'POST' }),
-  repostPost: (id: string) => request<ApiPost>(`/posts/${encodeURIComponent(id)}/repost`, { method: 'POST' }),
+  likePost: (id: string) =>
+    request<ApiPost>(`/posts/${encodeURIComponent(id)}/like`, { method: 'POST' }),
+  votePost: (id: string, value: -1 | 0 | 1) =>
+    request<ApiPost>(`/posts/${encodeURIComponent(id)}/vote`, {
+      method: 'POST',
+      body: JSON.stringify({ value }),
+    }),
+  repostPost: (id: string) =>
+    request<ApiPost>(`/posts/${encodeURIComponent(id)}/repost`, { method: 'POST' }),
+
+  // post comments
+  listPostComments: (postId: string) =>
+    request<ApiPostComment[]>(`/posts/${encodeURIComponent(postId)}/comments`),
+  createPostComment: (postId: string, body: { text: string; parentId?: string }) =>
+    request<ApiPostComment>(`/posts/${encodeURIComponent(postId)}/comments`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  deletePostComment: (postId: string, commentId: string) =>
+    request<{ ok: boolean }>(
+      `/posts/${encodeURIComponent(postId)}/comments/${encodeURIComponent(commentId)}`,
+      { method: 'DELETE' },
+    ),
+  votePostComment: (postId: string, commentId: string, value: -1 | 0 | 1) =>
+    request<ApiPostComment>(
+      `/posts/${encodeURIComponent(postId)}/comments/${encodeURIComponent(commentId)}/vote`,
+      { method: 'POST', body: JSON.stringify({ value }) },
+    ),
+
+  // communities
+  listCommunities: (params: { joinedOnly?: boolean; q?: string } = {}) => {
+    const qs = new URLSearchParams()
+    if (params.joinedOnly) qs.set('joined_only', 'true')
+    if (params.q) qs.set('q', params.q)
+    const s = qs.toString()
+    return request<ApiCommunity[]>('/communities' + (s ? `?${s}` : ''))
+  },
+  getCommunity: (slug: string) =>
+    request<ApiCommunity>(`/communities/${encodeURIComponent(slug)}`),
+  createCommunity: (body: { slug: string; name: string; description?: string }) =>
+    request<ApiCommunity>('/communities', { method: 'POST', body: JSON.stringify(body) }),
+  joinCommunity: (slug: string) =>
+    request<ApiCommunity>(`/communities/${encodeURIComponent(slug)}/join`, { method: 'POST' }),
+  leaveCommunity: (slug: string) =>
+    request<ApiCommunity>(`/communities/${encodeURIComponent(slug)}/leave`, { method: 'POST' }),
 
   // folders
   listFolders: () => request<ApiFolder[]>('/folders'),

@@ -109,6 +109,36 @@ export type NewsPost = {
   liked?: boolean
   reposted?: boolean
   media?: PostMediaItem[]
+  communityId?: string
+  title?: string
+  score?: number
+  ups?: number
+  downs?: number
+  myVote?: -1 | 0 | 1
+}
+
+export type Community = {
+  id: string
+  slug: string
+  name: string
+  description: string
+  createdBy: string
+  createdAt: number
+  members: number
+  joined: boolean
+  role: string
+}
+
+export type PostComment = {
+  id: string
+  postId: string
+  parentId: string
+  authorId: string
+  text: string
+  at: number
+  score: number
+  myVote: -1 | 0 | 1
+  deleted: boolean
 }
 
 export type ChatFolder = {

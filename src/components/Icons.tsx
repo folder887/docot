@@ -289,6 +289,30 @@ export function IconChevron({ size = 18, className, stroke = 2.5 }: IconProps) {
   )
 }
 
+export function IconArrowUp({ size = 18, className, stroke = 2.5, filled }: IconProps & { filled?: boolean }) {
+  return (
+    <svg {...base(size)} className={className} stroke="currentColor" strokeWidth={stroke} fill={filled ? 'currentColor' : 'none'} strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="6 14 12 8 18 14" />
+    </svg>
+  )
+}
+
+export function IconArrowDown({ size = 18, className, stroke = 2.5, filled }: IconProps & { filled?: boolean }) {
+  return (
+    <svg {...base(size)} className={className} stroke="currentColor" strokeWidth={stroke} fill={filled ? 'currentColor' : 'none'} strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="6 10 12 16 18 10" />
+    </svg>
+  )
+}
+
+export function IconComment({ size = 18, className, stroke = 2 }: IconProps) {
+  return (
+    <svg {...base(size)} className={className} stroke="currentColor" strokeWidth={stroke} fill="none" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 11.5c0 4.142-4.03 7.5-9 7.5-1.385 0-2.7-.262-3.882-.731L3 20l1.366-3.97A7.36 7.36 0 0 1 3 11.5C3 7.358 7.03 4 12 4s9 3.358 9 7.5z" />
+    </svg>
+  )
+}
+
 export function IconQR({ size = 18, className, stroke = 2 }: IconProps) {
   return (
     <svg {...base(size)} className={className} stroke="currentColor" strokeWidth={stroke} fill="none" strokeLinecap="round" strokeLinejoin="round">

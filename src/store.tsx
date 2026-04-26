@@ -92,9 +92,14 @@ type Ctx = {
   addNote: (title: string) => Promise<string>
   updateNote: (id: string, patch: Partial<Pick<Note, 'title' | 'body' | 'tags'>>) => Promise<void>
   deleteNote: (id: string) => Promise<void>
-  addPost: (text: string, media?: NewsPost['media']) => Promise<void>
+  addPost: (
+    text: string,
+    media?: NewsPost['media'],
+    opts?: { title?: string; communityId?: string },
+  ) => Promise<void>
   deletePost: (id: string) => Promise<void>
   toggleLike: (id: string) => Promise<void>
+  votePost: (id: string, value: -1 | 0 | 1) => Promise<void>
   repost: (id: string) => Promise<void>
   createFolder: (name: string, chatIds?: string[]) => Promise<string>
   renameFolder: (id: string, name: string) => Promise<void>
@@ -327,6 +332,12 @@ function postFromApi(p: ApiPost): NewsPost {
     liked: p.liked,
     reposted: p.reposted,
     media: p.media ?? [],
+    communityId: p.communityId ?? '',
+    title: p.title ?? '',
+    score: p.score ?? 0,
+    ups: p.ups ?? 0,
+    downs: p.downs ?? 0,
+    myVote: p.myVote ?? 0,
   }
 }
 
@@ -986,22 +997,39 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setState((s) => ({ ...s, notes: s.notes.filter((n) => n.id !== id) }))
   }, [])
 
-  const addPost = useCallback(async (text: string, media: NewsPost['media'] = []) => {
-    const trimmed = text.trim()
-    if (!trimmed && (!media || media.length === 0)) return
-    const p = postFromApi(
-      await api.createPost({
-        text: trimmed,
-        media: (media ?? []).map((m) => ({
-          url: m.url,
-          kind: m.kind,
-          name: m.name,
-          mime: m.mime,
-          size: m.size,
-        })),
-      }),
-    )
-    setState((s) => ({ ...s, news: [p, ...s.news] }))
+  const addPost = useCallback(
+    async (
+      text: string,
+      media: NewsPost['media'] = [],
+      opts: { title?: string; communityId?: string } = {},
+    ) => {
+      const trimmed = text.trim()
+      if (!trimmed && (!media || media.length === 0) && !opts.title?.trim()) return
+      const p = postFromApi(
+        await api.createPost({
+          text: trimmed,
+          title: opts.title?.trim() || undefined,
+          communityId: opts.communityId || undefined,
+          media: (media ?? []).map((m) => ({
+            url: m.url,
+            kind: m.kind,
+            name: m.name,
+            mime: m.mime,
+            size: m.size,
+          })),
+        }),
+      )
+      setState((s) => ({ ...s, news: [p, ...s.news] }))
+    },
+    [],
+  )
+
+  const votePost = useCallback(async (id: string, value: -1 | 0 | 1) => {
+    const p = postFromApi(await api.votePost(id, value))
+    setState((s) => ({
+      ...s,
+      news: s.news.map((n) => (n.id === id ? p : n)),
+    }))
   }, [])
 
   const deletePost = useCallback(async (id: string) => {
@@ -1138,6 +1166,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addPost,
       deletePost,
       toggleLike,
+      votePost,
       repost,
       createFolder,
       renameFolder,
@@ -1183,6 +1212,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addPost,
       deletePost,
       toggleLike,
+      votePost,
       repost,
       createFolder,
       renameFolder,
