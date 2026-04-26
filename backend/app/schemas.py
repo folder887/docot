@@ -58,6 +58,12 @@ class UserUpdateIn(BaseModel):
     phone: str | None = None
 
 
+class ReactionAggOut(BaseModel):
+    emoji: str
+    count: int
+    mine: bool
+
+
 class MessageOut(BaseModel):
     id: str
     authorId: str
@@ -67,9 +73,14 @@ class MessageOut(BaseModel):
     deletedAt: int | None = None
     replyToId: str | None = None
     sealed: bool = False
+    reactions: list[ReactionAggOut] = []
 
     class Config:
         from_attributes = True
+
+
+class ReactionIn(BaseModel):
+    emoji: str = Field(min_length=1, max_length=32)
 
 
 class MessageIn(BaseModel):
@@ -312,6 +323,38 @@ class PairStartOut(BaseModel):
 
 class PairClaimIn(BaseModel):
     token: str = Field(min_length=8, max_length=64)
+
+
+class PollOptionOut(BaseModel):
+    id: int
+    text: str
+    votes: int
+    mine: bool
+
+
+class PollOut(BaseModel):
+    id: str
+    chatId: str
+    messageId: str
+    question: str
+    multiple: bool
+    anonymous: bool
+    createdBy: str
+    createdAt: int
+    closedAt: int | None = None
+    options: list[PollOptionOut]
+    totalVoters: int
+
+
+class PollCreateIn(BaseModel):
+    question: str = Field(min_length=1, max_length=500)
+    options: list[str] = Field(min_length=2, max_length=12)
+    multiple: bool = False
+    anonymous: bool = True
+
+
+class PollVoteIn(BaseModel):
+    optionIds: list[int] = Field(min_length=0, max_length=12)
 
 
 AuthOut.model_rebuild()

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { decodeMedia, mediaUrl } from '../messageMedia'
 import { LiteMarkdown } from '../lite-md'
 import { IconPause, IconPlay } from './Icons'
+import { PollCard } from './PollCard'
 
 function fmt(s: number): string {
   s = Math.max(0, Math.floor(s))
@@ -101,7 +102,11 @@ function FileBubble({ url, name, size }: { url: string; name?: string; size?: nu
   )
 }
 
-export function MessageContent({ text }: { text: string }) {
+export function MessageContent({ text, onMine = false }: { text: string; onMine?: boolean }) {
+  if (text.startsWith('__poll:')) {
+    const pollId = text.slice('__poll:'.length).trim()
+    if (pollId) return <PollCard pollId={pollId} onMine={onMine} />
+  }
   const media = decodeMedia(text)
   if (media) {
     const url = mediaUrl(media)

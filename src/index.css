@@ -88,6 +88,22 @@ body,
   overscroll-behavior-y: none;
 }
 
+/*
+ * Emoji rendering: prefer the platform's native colour-emoji font in a fixed
+ * priority order. macOS / iOS users get the Apple set natively (the closest
+ * match to the requested "iOS style"); Windows gets Segoe UI Emoji, Android
+ * / ChromeOS gets Noto Color Emoji. The fallback to system-emoji keeps the
+ * markup simple and avoids shipping a multi-megabyte sprite sheet for
+ * nothing.
+ */
+.font-emoji,
+.font-emoji * {
+  font-family: 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
+    'Noto Color Emoji', 'Twemoji Mozilla', system-ui, sans-serif;
+  font-style: normal;
+  font-variant-emoji: emoji;
+}
+
 body {
   margin: 0;
 }

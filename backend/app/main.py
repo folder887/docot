@@ -16,6 +16,7 @@ from .routers import (
     invites,
     keys,
     notes,
+    polls,
     posts,
     uploads,
     users,
@@ -103,6 +104,7 @@ def create_app() -> FastAPI:
     app.include_router(folders.router)
     app.include_router(invites.router)
     app.include_router(keys.router)
+    app.include_router(polls.router)
     app.include_router(uploads.router)
     return app
 

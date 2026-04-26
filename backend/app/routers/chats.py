@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+from collections import defaultdict
+
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
 from ..auth import current_user, user_from_token
 from ..db import SessionLocal, get_db
-from ..models import Chat, ChatMember, Message, User, now_ms
+from ..models import Chat, ChatMember, Message, MessageReaction, User, now_ms
 from ..schemas import (
     ChatCreateIn,
     ChatMemberOut,
@@ -16,13 +18,19 @@ from ..schemas import (
     MessageIn,
     MessageOut,
     MessagePatch,
+    ReactionAggOut,
+    ReactionIn,
 )
 from ..ws import hub
 
 router = APIRouter(prefix="/chats", tags=["chats"])
 
 
-def _msg_out(m: Message, viewer_id: str | None = None) -> MessageOut:
+def _msg_out(
+    m: Message,
+    viewer_id: str | None = None,
+    reactions: list[ReactionAggOut] | None = None,
+) -> MessageOut:
     text_value = "" if m.deleted_at else m.text
     sealed = bool(getattr(m, "sealed", False))
     # Sealed messages: the server still records the real author privately for
@@ -44,7 +52,35 @@ def _msg_out(m: Message, viewer_id: str | None = None) -> MessageOut:
         deletedAt=m.deleted_at,
         replyToId=m.reply_to_id,
         sealed=sealed,
+        reactions=reactions or [],
     )
+
+
+def _reactions_by_message(
+    db: Session, message_ids: list[str], viewer_id: str
+) -> dict[str, list[ReactionAggOut]]:
+    """Aggregate reactions per (message_id, emoji) and tag the viewer's votes."""
+    if not message_ids:
+        return {}
+    rows = (
+        db.query(MessageReaction)
+        .filter(MessageReaction.message_id.in_(message_ids))
+        .all()
+    )
+    # message_id -> emoji -> {count, mine}
+    by_msg: dict[str, dict[str, dict[str, object]]] = defaultdict(dict)
+    for r in rows:
+        bucket = by_msg[r.message_id].setdefault(r.emoji, {"count": 0, "mine": False})
+        bucket["count"] = int(bucket["count"]) + 1  # type: ignore[arg-type]
+        if r.user_id == viewer_id:
+            bucket["mine"] = True
+    out: dict[str, list[ReactionAggOut]] = {}
+    for mid, emojis in by_msg.items():
+        out[mid] = [
+            ReactionAggOut(emoji=e, count=int(v["count"]), mine=bool(v["mine"]))
+            for e, v in sorted(emojis.items(), key=lambda kv: -int(kv[1]["count"]))
+        ]
+    return out
 
 
 def _chat_out(db: Session, chat: Chat, me_id: str, with_history: bool = False) -> ChatOut:
@@ -65,7 +101,8 @@ def _chat_out(db: Session, chat: Chat, me_id: str, with_history: bool = False) -
             .limit(500)
             .all()
         )
-        msgs = [_msg_out(m, viewer_id=me_id) for m in rows]
+        rmap = _reactions_by_message(db, [m.id for m in rows], me_id)
+        msgs = [_msg_out(m, viewer_id=me_id, reactions=rmap.get(m.id)) for m in rows]
 
     title = chat.title
     if chat.kind == "dm" and not title:
@@ -185,7 +222,8 @@ def list_messages(
         q = q.filter(Message.created_at < before)
     rows = q.order_by(Message.created_at.desc()).limit(max(1, min(limit, 500))).all()
     rows.reverse()
-    return [_msg_out(m, viewer_id=me.id) for m in rows]
+    rmap = _reactions_by_message(db, [m.id for m in rows], me.id)
+    return [_msg_out(m, viewer_id=me.id, reactions=rmap.get(m.id)) for m in rows]
 
 
 @router.post("/{chat_id}/messages", response_model=MessageOut)
@@ -296,6 +334,64 @@ async def delete_message(
     }
     await hub.broadcast(chat_id, payload)
     return {"ok": True, "id": message_id}
+
+
+@router.post(
+    "/{chat_id}/messages/{message_id}/reactions",
+    response_model=list[ReactionAggOut],
+)
+async def toggle_reaction(
+    chat_id: str,
+    message_id: str,
+    body: ReactionIn,
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> list[ReactionAggOut]:
+    _require_member(db, chat_id, me.id)
+    msg = db.get(Message, message_id)
+    if not msg or msg.chat_id != chat_id:
+        raise HTTPException(status_code=404, detail="Message not found")
+    if msg.deleted_at:
+        raise HTTPException(status_code=410, detail="Message deleted")
+    emoji = body.emoji.strip()
+    if not emoji:
+        raise HTTPException(status_code=400, detail="Empty emoji")
+
+    existing = (
+        db.query(MessageReaction)
+        .filter(
+            MessageReaction.message_id == message_id,
+            MessageReaction.user_id == me.id,
+            MessageReaction.emoji == emoji,
+        )
+        .first()
+    )
+    if existing:
+        db.delete(existing)
+    else:
+        db.add(
+            MessageReaction(
+                chat_id=chat_id,
+                message_id=message_id,
+                user_id=me.id,
+                emoji=emoji,
+            )
+        )
+    db.commit()
+
+    aggregated = _reactions_by_message(db, [message_id], me.id).get(message_id, [])
+    # Broadcast a viewer-neutral aggregate (no `mine` field bias). Each client
+    # recomputes `mine` locally from the diff event.
+    payload = {
+        "type": "reactions_updated",
+        "chatId": chat_id,
+        "messageId": message_id,
+        "userId": me.id,
+        "emoji": emoji,
+        "added": existing is None,
+    }
+    await hub.broadcast(chat_id, payload)
+    return aggregated
 
 
 @router.patch("/{chat_id}", response_model=ChatOut)

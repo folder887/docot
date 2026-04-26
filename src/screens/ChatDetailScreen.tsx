@@ -12,6 +12,10 @@ import { api, getToken, openChatWebSocket } from '../api'
 import type { Message } from '../types'
 import { recallOutgoing } from '../crypto/outgoing'
 
+// Same six picks exposed by Telegram, Slack and Apple Messages: covers the
+// 80% case so most users never need to open a full picker.
+const QUICK_REACTIONS = ['❤️', '👍', '😂', '🔥', '😮', '😢'] as const
+
 export function ChatDetailScreen() {
   const { id } = useParams<{ id: string }>()
   const {
@@ -25,6 +29,8 @@ export function ChatDetailScreen() {
     deleteMessage,
     applyMessageEdit,
     applyMessageDelete,
+    toggleReaction,
+    applyReactionEvent,
   } = useApp()
   const navigate = useNavigate()
   const chat = useMemo(() => state.chats.find((c) => c.id === id), [id, state.chats])
@@ -87,6 +93,10 @@ export function ChatDetailScreen() {
           message?: Message
           messageId?: string
           deletedAt?: number
+          userId?: string
+          emoji?: string
+          added?: boolean
+          pollId?: string
         }
         if (data.type === 'message' && data.message) {
           const incoming = data.message
@@ -106,6 +116,23 @@ export function ChatDetailScreen() {
           queue = queue.then(() => applyMessageEdit(chat.id, edited))
         } else if (data.type === 'message_deleted' && data.messageId) {
           applyMessageDelete(chat.id, data.messageId, data.deletedAt ?? Date.now())
+        } else if (data.type === 'poll_updated' && data.pollId) {
+          window.dispatchEvent(
+            new CustomEvent('docot:poll_updated', { detail: { pollId: data.pollId } }),
+          )
+        } else if (
+          data.type === 'reactions_updated' &&
+          data.messageId &&
+          data.userId &&
+          data.emoji
+        ) {
+          applyReactionEvent(
+            chat.id,
+            data.messageId,
+            data.userId,
+            data.emoji,
+            !!data.added,
+          )
         }
       } catch {
         /* ignore */
@@ -265,19 +292,42 @@ export function ChatDetailScreen() {
                 {isDeleted ? (
                   <p className="italic opacity-60">{t('msg.deleted', state.lang)}</p>
                 ) : (
-                  <MessageContent text={m.text} />
+                  <MessageContent text={m.text} onMine={mine} />
                 )}
                 <div className="mt-1 flex items-center justify-end gap-1.5 text-[10px] opacity-70">
                   {m.editedAt && !isDeleted && <span>{t('msg.edited', state.lang)}</span>}
                   <span>{relTime(m.at, state.lang)}</span>
                 </div>
               </button>
+              {m.reactions && m.reactions.length > 0 && !isDeleted && (
+                <div
+                  className={`mt-1 flex flex-wrap gap-1 ${mine ? 'justify-end' : 'justify-start'}`}
+                >
+                  {m.reactions.map((r) => (
+                    <button
+                      key={r.emoji}
+                      type="button"
+                      onClick={() => void toggleReaction(chat.id, m.id, r.emoji)}
+                      className={`flex items-center gap-1 rounded-full border-2 px-2 py-0.5 text-[12px] leading-none ${
+                        r.mine
+                          ? 'border-ink bg-ink text-paper'
+                          : 'border-ink bg-paper text-ink'
+                      }`}
+                      aria-label={`Reaction ${r.emoji}`}
+                    >
+                      <span className="font-emoji">{r.emoji}</span>
+                      <span className="font-bold tabular-nums">{r.count}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )
         })}
         <div ref={endRef} />
       </div>
       <ChatComposer
+        chatId={chat.id}
         onSend={onSend}
         editing={editing}
         onSubmitEdit={onSubmitEdit}
@@ -290,6 +340,28 @@ export function ChatDetailScreen() {
       <Modal open={!!actionFor} onClose={() => setActionFor(null)} title={t('msg.copy', state.lang)}>
         {actionFor && (
           <ul className="flex flex-col gap-1 text-base font-bold">
+            <li className="mb-1 flex items-center justify-between gap-1 rounded-2xl border-2 border-ink p-1">
+              {QUICK_REACTIONS.map((emoji) => {
+                const isMine =
+                  actionFor.reactions?.find((r) => r.emoji === emoji)?.mine ?? false
+                return (
+                  <button
+                    key={emoji}
+                    type="button"
+                    onClick={() => {
+                      void toggleReaction(chat.id, actionFor.id, emoji)
+                      setActionFor(null)
+                    }}
+                    className={`flex h-9 w-9 items-center justify-center rounded-full text-xl transition ${
+                      isMine ? 'bg-ink text-paper' : 'hover:bg-ink/10'
+                    }`}
+                    aria-label={`React ${emoji}`}
+                  >
+                    <span className="font-emoji">{emoji}</span>
+                  </button>
+                )
+              })}
+            </li>
             <Sheet
               label={t('msg.reply', state.lang)}
               onClick={() => {

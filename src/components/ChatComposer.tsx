@@ -26,6 +26,8 @@ type Props = {
   /** Optional reply context displayed above the composer. */
   replyTo?: { id: string; preview: string; author?: string } | null
   onCancelReply?: () => void
+  /** Chat id needed for poll creation; omit on screens without polls. */
+  chatId?: string
 }
 
 const MARKERS: Record<string, string> = {
@@ -60,6 +62,7 @@ export function ChatComposer({
   onCancelEdit,
   replyTo,
   onCancelReply,
+  chatId,
 }: Props) {
   const { state } = useApp()
   const [text, setText] = useState('')
@@ -73,6 +76,8 @@ export function ChatComposer({
   const [recState, setRecState] = useState<'idle' | 'recording' | 'sending'>('idle')
   const [recSeconds, setRecSeconds] = useState(0)
   const [uploading, setUploading] = useState(false)
+  const [attachOpen, setAttachOpen] = useState(false)
+  const [pollOpen, setPollOpen] = useState(false)
   const taRef = useRef<HTMLTextAreaElement>(null)
   const recorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
@@ -292,15 +297,51 @@ export function ChatComposer({
       )}
       <form className="flex items-end gap-2 px-3 py-2" onSubmit={handleSubmit}>
         <input ref={fileRef} type="file" hidden onChange={handleFile} accept="image/*,video/*,audio/*,application/pdf,text/plain" />
-        <button
-          type="button"
-          onClick={() => fileRef.current?.click()}
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-2 border-ink text-ink disabled:opacity-50"
-          disabled={uploading || recState !== 'idle'}
-          aria-label={t('chat.attach', state.lang)}
-        >
-          {uploading ? <IconImage size={18} /> : <IconPaperclip size={20} />}
-        </button>
+        <div className="relative shrink-0">
+          {attachOpen && (
+            <>
+              <button
+                type="button"
+                aria-label="close-attach-menu"
+                onClick={() => setAttachOpen(false)}
+                className="fixed inset-0 z-10 cursor-default bg-transparent"
+              />
+              <div className="absolute bottom-full left-0 z-20 mb-2 flex w-44 flex-col rounded-2xl border-2 border-ink bg-paper p-1 text-base font-bold shadow-xl">
+                <button
+                  type="button"
+                  className="rounded-xl px-3 py-2 text-left hover:bg-ink/10"
+                  onClick={() => {
+                    setAttachOpen(false)
+                    fileRef.current?.click()
+                  }}
+                >
+                  {t('chat.attach', state.lang)}
+                </button>
+                {chatId && (
+                  <button
+                    type="button"
+                    className="rounded-xl px-3 py-2 text-left hover:bg-ink/10"
+                    onClick={() => {
+                      setAttachOpen(false)
+                      setPollOpen(true)
+                    }}
+                  >
+                    {t('msg.poll', state.lang)}
+                  </button>
+                )}
+              </div>
+            </>
+          )}
+          <button
+            type="button"
+            onClick={() => setAttachOpen((v) => !v)}
+            className="flex h-11 w-11 items-center justify-center rounded-full border-2 border-ink text-ink disabled:opacity-50"
+            disabled={uploading || recState !== 'idle'}
+            aria-label={t('chat.attach', state.lang)}
+          >
+            {uploading ? <IconImage size={18} /> : <IconPaperclip size={20} />}
+          </button>
+        </div>
         <textarea
           ref={taRef}
           value={text}
@@ -340,6 +381,139 @@ export function ChatComposer({
           </button>
         )}
       </form>
+      {pollOpen && chatId && (
+        <PollModal chatId={chatId} onClose={() => setPollOpen(false)} />
+      )}
+    </div>
+  )
+}
+
+function PollModal({ chatId, onClose }: { chatId: string; onClose: () => void }) {
+  const { state } = useApp()
+  const [question, setQuestion] = useState('')
+  const [options, setOptions] = useState<string[]>(['', ''])
+  const [multiple, setMultiple] = useState(false)
+  const [anonymous, setAnonymous] = useState(true)
+  const [busy, setBusy] = useState(false)
+
+  const setOpt = (i: number, v: string) =>
+    setOptions((arr) => arr.map((x, j) => (j === i ? v : x)))
+  const addOpt = () => setOptions((arr) => (arr.length < 12 ? [...arr, ''] : arr))
+  const removeOpt = (i: number) =>
+    setOptions((arr) => (arr.length > 2 ? arr.filter((_, j) => j !== i) : arr))
+
+  const submit = async () => {
+    const q = question.trim()
+    const opts = options.map((o) => o.trim()).filter((o) => o.length > 0)
+    if (q.length === 0) {
+      showToast(t('poll.error.shortQuestion', state.lang))
+      return
+    }
+    if (opts.length < 2) {
+      showToast(t('poll.error.fewOptions', state.lang))
+      return
+    }
+    setBusy(true)
+    try {
+      await api.createPoll(chatId, { question: q, options: opts, multiple, anonymous })
+      onClose()
+    } catch {
+      showToast('Failed to create poll')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-md rounded-2xl border-2 border-ink bg-paper p-4 text-ink"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 className="mb-3 text-lg font-extrabold">{t('poll.create', state.lang)}</h2>
+        <label className="mb-2 block text-xs font-bold uppercase tracking-wider opacity-60">
+          {t('poll.question', state.lang)}
+        </label>
+        <input
+          type="text"
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+          maxLength={500}
+          placeholder={t('poll.question', state.lang)}
+          className="mb-3 w-full rounded-xl border-2 border-ink bg-paper px-3 py-2 text-base focus:outline-none"
+        />
+        <div className="mb-3 flex flex-col gap-2">
+          {options.map((opt, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <input
+                type="text"
+                value={opt}
+                onChange={(e) => setOpt(i, e.target.value)}
+                maxLength={500}
+                placeholder={`${t('poll.option', state.lang)} ${i + 1}`}
+                className="flex-1 rounded-xl border-2 border-ink bg-paper px-3 py-2 text-base focus:outline-none"
+              />
+              {options.length > 2 && (
+                <button
+                  type="button"
+                  onClick={() => removeOpt(i)}
+                  className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-ink text-ink"
+                  aria-label="remove"
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          ))}
+          {options.length < 12 && (
+            <button
+              type="button"
+              onClick={addOpt}
+              className="self-start text-sm font-bold underline"
+            >
+              + {t('poll.addOption', state.lang)}
+            </button>
+          )}
+        </div>
+        <label className="mb-2 flex items-center gap-2 text-sm font-bold">
+          <input
+            type="checkbox"
+            checked={multiple}
+            onChange={(e) => setMultiple(e.target.checked)}
+            className="h-4 w-4 accent-ink"
+          />
+          {t('poll.multiple', state.lang)}
+        </label>
+        <label className="mb-3 flex items-center gap-2 text-sm font-bold">
+          <input
+            type="checkbox"
+            checked={anonymous}
+            onChange={(e) => setAnonymous(e.target.checked)}
+            className="h-4 w-4 accent-ink"
+          />
+          {t('poll.anonymous', state.lang)}
+        </label>
+        <div className="flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-full border-2 border-ink px-4 py-2 text-sm font-bold"
+          >
+            {t('poll.cancel', state.lang)}
+          </button>
+          <button
+            type="button"
+            onClick={() => void submit()}
+            disabled={busy}
+            className="rounded-full border-2 border-ink bg-ink px-4 py-2 text-sm font-bold text-paper disabled:opacity-50"
+          >
+            {t('poll.send', state.lang)}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

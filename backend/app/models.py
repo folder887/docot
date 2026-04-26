@@ -229,6 +229,69 @@ class UserKeys(Base):
     updated_at: Mapped[int] = mapped_column(Integer, default=now_ms)
 
 
+class Poll(Base):
+    """Polls live alongside chat messages: creating a poll inserts a marker
+    message (`__poll:<id>`) into the chat so the existing message-stream UI
+    surfaces the poll inline; the marker is the canonical anchor and any
+    later edits / deletions cascade to the poll."""
+
+    __tablename__ = "polls"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    chat_id: Mapped[str] = mapped_column(String, ForeignKey("chats.id", ondelete="CASCADE"), index=True)
+    message_id: Mapped[str] = mapped_column(String, ForeignKey("messages.id", ondelete="CASCADE"), index=True)
+    question: Mapped[str] = mapped_column(String(500))
+    multiple: Mapped[bool] = mapped_column(Boolean, default=False)
+    anonymous: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"))
+    created_at: Mapped[int] = mapped_column(Integer, default=now_ms)
+    closed_at: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    options: Mapped[list[PollOption]] = relationship(
+        "PollOption", cascade="all, delete-orphan", order_by="PollOption.idx"
+    )
+
+
+class PollOption(Base):
+    __tablename__ = "poll_options"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    poll_id: Mapped[str] = mapped_column(String, ForeignKey("polls.id", ondelete="CASCADE"), index=True)
+    idx: Mapped[int] = mapped_column(Integer)
+    text: Mapped[str] = mapped_column(String(500))
+
+
+class PollVote(Base):
+    __tablename__ = "poll_votes"
+    __table_args__ = (
+        UniqueConstraint("poll_id", "user_id", "option_id", name="uq_pollvote"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    poll_id: Mapped[str] = mapped_column(String, ForeignKey("polls.id", ondelete="CASCADE"), index=True)
+    option_id: Mapped[int] = mapped_column(Integer, ForeignKey("poll_options.id", ondelete="CASCADE"))
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"))
+    created_at: Mapped[int] = mapped_column(Integer, default=now_ms)
+
+
+class MessageReaction(Base):
+    """One reaction by one user on one message; (message, user, emoji) is unique
+    so toggling/insert is idempotent."""
+
+    __tablename__ = "message_reactions"
+    __table_args__ = (
+        UniqueConstraint("message_id", "user_id", "emoji", name="uq_reaction"),
+        Index("ix_reaction_message", "message_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    chat_id: Mapped[str] = mapped_column(String, ForeignKey("chats.id", ondelete="CASCADE"), index=True)
+    message_id: Mapped[str] = mapped_column(String, ForeignKey("messages.id", ondelete="CASCADE"))
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"))
+    emoji: Mapped[str] = mapped_column(String(32))
+    created_at: Mapped[int] = mapped_column(Integer, default=now_ms)
+
+
 class PairToken(Base):
     """Short-lived QR pairing token. The logged-in device generates one and
     a new device claims it to receive a fresh session token for the same user.

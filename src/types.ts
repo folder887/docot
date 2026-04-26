@@ -28,6 +28,12 @@ export type User = {
   phone?: string
 }
 
+export type ReactionAgg = {
+  emoji: string
+  count: number
+  mine: boolean
+}
+
 export type Message = {
   id: string
   authorId: string
@@ -40,6 +46,7 @@ export type Message = {
    * `authorId`; the client substitutes the inferred sender (the other
    * participant in the DM). */
   sealed?: boolean
+  reactions?: ReactionAgg[]
 }
 
 export type ChatRole = 'owner' | 'admin' | 'member'

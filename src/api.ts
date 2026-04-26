@@ -55,6 +55,33 @@ export type ApiUser = {
   blocked: boolean
 }
 
+export type ApiReactionAgg = {
+  emoji: string
+  count: number
+  mine: boolean
+}
+
+export type ApiPollOption = {
+  id: number
+  text: string
+  votes: number
+  mine: boolean
+}
+
+export type ApiPoll = {
+  id: string
+  chatId: string
+  messageId: string
+  question: string
+  multiple: boolean
+  anonymous: boolean
+  createdBy: string
+  createdAt: number
+  closedAt: number | null
+  options: ApiPollOption[]
+  totalVoters: number
+}
+
 export type ApiMessage = {
   id: string
   authorId: string
@@ -66,6 +93,7 @@ export type ApiMessage = {
   /** Sealed-sender messages have an empty `authorId`; clients fall back to the
    * other DM participant and verify identity via the inner Signal envelope. */
   sealed?: boolean
+  reactions?: ApiReactionAgg[]
 }
 
 export type ApiChat = {
@@ -242,6 +270,27 @@ export const api = {
       `/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(messageId)}`,
       { method: 'DELETE' },
     ),
+  toggleReaction: (chatId: string, messageId: string, emoji: string) =>
+    request<ApiReactionAgg[]>(
+      `/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(messageId)}/reactions`,
+      { method: 'POST', body: JSON.stringify({ emoji }) },
+    ),
+  createPoll: (
+    chatId: string,
+    body: { question: string; options: string[]; multiple?: boolean; anonymous?: boolean },
+  ) =>
+    request<ApiPoll>(`/chats/${encodeURIComponent(chatId)}/polls`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  getPoll: (pollId: string) => request<ApiPoll>(`/polls/${encodeURIComponent(pollId)}`),
+  votePoll: (pollId: string, optionIds: number[]) =>
+    request<ApiPoll>(`/polls/${encodeURIComponent(pollId)}/vote`, {
+      method: 'POST',
+      body: JSON.stringify({ optionIds }),
+    }),
+  closePoll: (pollId: string) =>
+    request<ApiPoll>(`/polls/${encodeURIComponent(pollId)}/close`, { method: 'POST' }),
   listChatMembers: (chatId: string) =>
     request<ApiChatMember[]>(`/chats/${encodeURIComponent(chatId)}/members`),
   patchChatMember: (chatId: string, userId: string, role: 'owner' | 'admin' | 'member') =>

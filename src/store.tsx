@@ -70,6 +70,14 @@ type Ctx = {
   sendMessage: (chatId: string, text: string, replyToId?: string | null) => Promise<void>
   editMessage: (chatId: string, messageId: string, text: string) => Promise<void>
   deleteMessage: (chatId: string, messageId: string) => Promise<void>
+  toggleReaction: (chatId: string, messageId: string, emoji: string) => Promise<void>
+  applyReactionEvent: (
+    chatId: string,
+    messageId: string,
+    userId: string,
+    emoji: string,
+    added: boolean,
+  ) => void
   applyMessageEdit: (chatId: string, msg: Message) => Promise<void>
   applyMessageDelete: (chatId: string, messageId: string, deletedAt: number) => void
   createChat: (participantIds: string[], kind?: Chat['kind'], title?: string) => Promise<string>
@@ -142,6 +150,7 @@ function msgFromApi(m: ApiMessage): Message {
     deletedAt: m.deletedAt ?? null,
     replyToId: m.replyToId ?? null,
     sealed: m.sealed ?? false,
+    reactions: m.reactions ?? [],
   }
 }
 
@@ -688,6 +697,77 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [applyMessageDelete],
   )
 
+  const applyReactionEvent = useCallback(
+    (chatId: string, messageId: string, userId: string, emoji: string, added: boolean) => {
+      const me = state.me?.id
+      const update = (msg: Message): Message => {
+        const reactions = (msg.reactions ?? []).slice()
+        const idx = reactions.findIndex((r) => r.emoji === emoji)
+        if (added) {
+          if (idx < 0) {
+            reactions.push({ emoji, count: 1, mine: userId === me })
+          } else {
+            const cur = reactions[idx]
+            // Avoid double-counting our own optimistic +1.
+            if (userId === me && cur.mine) return msg
+            reactions[idx] = {
+              ...cur,
+              count: cur.count + 1,
+              mine: cur.mine || userId === me,
+            }
+          }
+        } else if (idx >= 0) {
+          const cur = reactions[idx]
+          if (userId === me && !cur.mine) return msg
+          const nextCount = cur.count - 1
+          if (nextCount <= 0) {
+            reactions.splice(idx, 1)
+          } else {
+            reactions[idx] = {
+              ...cur,
+              count: nextCount,
+              mine: userId === me ? false : cur.mine,
+            }
+          }
+        }
+        return { ...msg, reactions }
+      }
+      setState((s) => ({
+        ...s,
+        chats: s.chats.map((c) =>
+          c.id === chatId
+            ? {
+                ...c,
+                messages: c.messages.map((m) => (m.id === messageId ? update(m) : m)),
+              }
+            : c,
+        ),
+      }))
+    },
+    [state.me?.id],
+  )
+
+  const toggleReaction = useCallback(
+    async (chatId: string, messageId: string, emoji: string) => {
+      const me = state.me?.id
+      if (!me) return
+      // Optimistic apply; the server is source of truth via WS broadcast,
+      // which will deduplicate using the (mine && already-true) check above.
+      const chat = chatsRef.current.find((c) => c.id === chatId)
+      const cur = chat?.messages.find((m) => m.id === messageId)
+      const mine = cur?.reactions?.find((r) => r.emoji === emoji)?.mine ?? false
+      applyReactionEvent(chatId, messageId, me, emoji, !mine)
+      try {
+        await api.toggleReaction(chatId, messageId, emoji)
+      } catch (e) {
+        // Revert on failure.
+        applyReactionEvent(chatId, messageId, me, emoji, mine)
+        throw e
+      }
+    },
+    [state.me?.id, applyReactionEvent],
+  )
+
   const patchChat = useCallback(
     async (
       chatId: string,
@@ -1022,6 +1102,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       sendMessage,
       editMessage,
       deleteMessage,
+      toggleReaction,
+      applyReactionEvent,
       applyMessageEdit,
       applyMessageDelete,
       createChat,
@@ -1065,6 +1147,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       sendMessage,
       editMessage,
       deleteMessage,
+      toggleReaction,
+      applyReactionEvent,
       applyMessageEdit,
       applyMessageDelete,
       createChat,
