@@ -3,6 +3,7 @@ from __future__ import annotations
 import secrets
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from ..auth import current_user
@@ -14,7 +15,8 @@ router = APIRouter(tags=["invites"])
 
 
 def _new_token() -> str:
-    return secrets.token_urlsafe(8).replace("-", "").replace("_", "")[:16]
+    # 16 hex chars = 64 bits of entropy, fixed length, alphanumeric only.
+    return secrets.token_hex(8)
 
 
 def _invite_url(token: str) -> str:
@@ -162,6 +164,21 @@ def join_via_invite(
         .first()
     )
     if not existing:
+        # Atomically claim a slot. If max_uses is set, only succeed when
+        # there's still room; the WHERE clause makes check-and-increment a
+        # single SQL operation, preventing the TOCTOU race where two
+        # concurrent joins would both pass the _is_active check above.
+        stmt = (
+            update(ChatInvite)
+            .where(ChatInvite.id == inv.id, ChatInvite.revoked.is_(False))
+            .values(uses=ChatInvite.uses + 1)
+        )
+        if inv.max_uses is not None:
+            stmt = stmt.where(ChatInvite.uses < inv.max_uses)
+        result = db.execute(stmt)
+        if result.rowcount == 0:
+            db.rollback()
+            raise HTTPException(status_code=410, detail="Invite invalid or expired")
         db.add(
             ChatMember(
                 chat_id=chat.id,
@@ -169,7 +186,6 @@ def join_via_invite(
                 role="member",
             )
         )
-        inv.uses += 1
         chat.updated_at = now_ms()
         db.commit()
         db.refresh(chat)
