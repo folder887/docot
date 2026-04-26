@@ -15,6 +15,9 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 def _user_to_out(u: User) -> UserOut:
+    raw_links = (getattr(u, "links", "") or "").split("\n")
+    links = [ln.strip() for ln in raw_links if ln and ln.strip()]
+    avatar_url = getattr(u, "avatar_url", "") or None
     return UserOut(
         id=u.id,
         handle=u.handle,
@@ -22,6 +25,8 @@ def _user_to_out(u: User) -> UserOut:
         bio=u.bio,
         kind=u.kind,
         phone=u.phone,
+        avatarUrl=avatar_url,
+        links=links,
         lastSeen=u.last_seen_at,
     )
 

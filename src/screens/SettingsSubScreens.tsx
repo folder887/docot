@@ -451,10 +451,12 @@ function StorageSection() {
     setBusy(true)
     try {
       // Don't delete auth token, prefs, lang or passcode hashes.
+      // The auth/store modules use colon-separated keys; the passcode
+      // gate uses period-separated keys — keep both spellings.
       const keep = new Set([
-        'docot.token',
-        'docot.prefs',
-        'docot.lang',
+        'docot:token',
+        'docot:prefs',
+        'docot:lang',
         'docot.passcode.hash',
         'docot.passcode.salt',
       ])
