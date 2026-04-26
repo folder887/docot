@@ -12,7 +12,6 @@ import {
   IconPalette,
   IconQR,
   IconSliders,
-  IconSpeaker,
   IconUser,
 } from '../components/Icons'
 
@@ -29,37 +28,35 @@ const SECTIONS: Row[] = [
   { to: '/settings/chat', labelKey: 'settings.chatSettings', icon: <IconPalette size={20} /> },
   { to: '/settings/folders', labelKey: 'settings.folders', icon: <IconFolder size={20} /> },
   { to: '/settings/advanced', labelKey: 'settings.advanced', icon: <IconSliders size={20} /> },
-  { to: '/settings/speakers', labelKey: 'settings.speakers', icon: <IconSpeaker size={20} /> },
+  { to: '/settings/storage', labelKey: 'settings.storage', icon: <IconFolder size={20} /> },
+  { to: '/settings/devices', labelKey: 'settings.devices', icon: <IconLock size={20} /> },
   { to: '/settings/battery', labelKey: 'settings.battery', icon: <IconBattery size={20} /> },
 ]
 
 export function SettingsScreen() {
   const { state, logout } = useApp()
   const navigate = useNavigate()
+  const me = state.me
 
   return (
     <div className="flex min-h-0 flex-col bg-paper">
       <ScreenHeader title={t('settings.title', state.lang)} />
 
       <Link
-        to="/profile/me"
+        to={me ? `/profile/${me.id}` : '/settings'}
         className="row-press mx-4 mt-2 flex items-center gap-3 rounded-2xl border-2 border-ink bg-paper p-3"
       >
-        <Avatar name={state.me.name} size={56} filled />
+        <Avatar name={me?.name ?? '?'} size={56} filled />
         <div className="min-w-0 flex-1">
-          <div className="truncate text-lg font-black italic">{state.me.name}</div>
-          <div className="truncate text-sm text-muted">{state.me.handle}</div>
+          <div className="truncate text-lg font-black italic">{me?.name ?? '—'}</div>
+          <div className="truncate text-sm text-muted">{me?.handle ? `@${me.handle}` : ''}</div>
         </div>
-        <button
+        <span
           aria-label="QR"
           className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-ink"
-          onClick={(e) => {
-            e.preventDefault()
-            window.alert(state.me.handle)
-          }}
         >
           <IconQR size={16} />
-        </button>
+        </span>
       </Link>
 
       <ul className="mt-4 flex flex-col gap-0 border-y border-line bg-paper">

@@ -1,0 +1,622 @@
+from __future__ import annotations
+
+from collections import defaultdict
+
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from sqlalchemy import and_
+from sqlalchemy.orm import Session
+
+from ..auth import current_user, user_from_token
+from ..db import SessionLocal, get_db
+from ..models import Chat, ChatMember, Message, MessageReaction, User, now_ms
+from ..schemas import (
+    ChatCreateIn,
+    ChatMemberOut,
+    ChatMemberPatch,
+    ChatOut,
+    ChatPatch,
+    MessageIn,
+    MessageOut,
+    MessagePatch,
+    ReactionAggOut,
+    ReactionIn,
+)
+from ..ws import hub
+
+router = APIRouter(prefix="/chats", tags=["chats"])
+
+
+def _msg_out(
+    m: Message,
+    viewer_id: str | None = None,
+    reactions: list[ReactionAggOut] | None = None,
+) -> MessageOut:
+    text_value = "" if m.deleted_at else m.text
+    sealed = bool(getattr(m, "sealed", False))
+    # Sealed messages: the server still records the real author privately for
+    # permission checks (edit/delete) and every other observer (anonymous
+    # API access, WebSocket broadcast, server logs) sees an empty authorId.
+    # The author themselves still sees their own id back so that client UIs
+    # (history, last-message preview, reload) can attribute their own messages
+    # without resorting to fragile heuristics.
+    if sealed and viewer_id != m.author_id:
+        public_author = ""
+    else:
+        public_author = m.author_id
+    return MessageOut(
+        id=m.id,
+        authorId=public_author,
+        text=text_value,
+        at=m.created_at,
+        editedAt=m.edited_at,
+        deletedAt=m.deleted_at,
+        replyToId=m.reply_to_id,
+        sealed=sealed,
+        reactions=reactions or [],
+    )
+
+
+def _reactions_by_message(
+    db: Session, message_ids: list[str], viewer_id: str
+) -> dict[str, list[ReactionAggOut]]:
+    """Aggregate reactions per (message_id, emoji) and tag the viewer's votes."""
+    if not message_ids:
+        return {}
+    rows = (
+        db.query(MessageReaction)
+        .filter(MessageReaction.message_id.in_(message_ids))
+        .all()
+    )
+    # message_id -> emoji -> {count, mine}
+    by_msg: dict[str, dict[str, dict[str, object]]] = defaultdict(dict)
+    for r in rows:
+        bucket = by_msg[r.message_id].setdefault(r.emoji, {"count": 0, "mine": False})
+        bucket["count"] = int(bucket["count"]) + 1  # type: ignore[arg-type]
+        if r.user_id == viewer_id:
+            bucket["mine"] = True
+    out: dict[str, list[ReactionAggOut]] = {}
+    for mid, emojis in by_msg.items():
+        out[mid] = [
+            ReactionAggOut(emoji=e, count=int(v["count"]), mine=bool(v["mine"]))
+            for e, v in sorted(emojis.items(), key=lambda kv: -int(kv[1]["count"]))
+        ]
+    return out
+
+
+def _chat_out(db: Session, chat: Chat, me_id: str, with_history: bool = False) -> ChatOut:
+    members = [m.user_id for m in chat.members]
+    membership = next((m for m in chat.members if m.user_id == me_id), None)
+    last = (
+        db.query(Message)
+        .filter(Message.chat_id == chat.id)
+        .order_by(Message.created_at.desc())
+        .first()
+    )
+    msgs: list[MessageOut] = []
+    if with_history:
+        rows = (
+            db.query(Message)
+            .filter(Message.chat_id == chat.id)
+            .order_by(Message.created_at.asc())
+            .limit(500)
+            .all()
+        )
+        rmap = _reactions_by_message(db, [m.id for m in rows], me_id)
+        msgs = [_msg_out(m, viewer_id=me_id, reactions=rmap.get(m.id)) for m in rows]
+
+    title = chat.title
+    if chat.kind == "dm" and not title:
+        other = next((m for m in chat.members if m.user_id != me_id), None)
+        if other and other.user:
+            title = other.user.name
+
+    return ChatOut(
+        id=chat.id,
+        kind=chat.kind,
+        title=title or "Chat",
+        description=getattr(chat, "description", "") or "",
+        isPublic=bool(getattr(chat, "is_public", False)),
+        slowModeSeconds=int(getattr(chat, "slow_mode_seconds", 0) or 0),
+        subscribersOnly=bool(getattr(chat, "subscribers_only", False)),
+        signedPosts=bool(getattr(chat, "signed_posts", False)),
+        createdBy=chat.created_by,
+        participants=members,
+        pinned=bool(membership and membership.pinned),
+        muted=bool(membership and membership.muted),
+        role=membership.role if membership else "member",
+        updatedAt=chat.updated_at,
+        lastMessage=_msg_out(last, viewer_id=me_id) if last else None,
+        messages=msgs,
+    )
+
+
+@router.get("", response_model=list[ChatOut])
+def list_chats(me: User = Depends(current_user), db: Session = Depends(get_db)) -> list[ChatOut]:
+    chats = (
+        db.query(Chat)
+        .join(ChatMember, ChatMember.chat_id == Chat.id)
+        .filter(ChatMember.user_id == me.id)
+        .order_by(Chat.updated_at.desc())
+        .all()
+    )
+    return [_chat_out(db, c, me.id) for c in chats]
+
+
+@router.post("", response_model=ChatOut)
+def create_chat(
+    body: ChatCreateIn,
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> ChatOut:
+    participant_ids = list(dict.fromkeys([me.id, *body.participantIds]))
+    for pid in participant_ids:
+        if not db.get(User, pid):
+            raise HTTPException(status_code=400, detail=f"Unknown user: {pid}")
+
+    if body.kind == "dm":
+        if len(participant_ids) != 2:
+            raise HTTPException(status_code=400, detail="DM requires exactly 1 other participant")
+        existing = (
+            db.query(Chat)
+            .join(ChatMember, ChatMember.chat_id == Chat.id)
+            .filter(Chat.kind == "dm", ChatMember.user_id == me.id)
+            .all()
+        )
+        for c in existing:
+            member_ids = {m.user_id for m in c.members}
+            if member_ids == set(participant_ids):
+                return _chat_out(db, c, me.id, with_history=True)
+
+    chat = Chat(
+        kind=body.kind,
+        title=body.title or "",
+        description=body.description or "",
+        is_public=bool(body.isPublic) if body.isPublic is not None else False,
+        created_by=me.id,
+    )
+    db.add(chat)
+    db.flush()
+    for pid in participant_ids:
+        db.add(
+            ChatMember(
+                chat_id=chat.id,
+                user_id=pid,
+                role="owner" if pid == me.id else "member",
+            )
+        )
+    db.commit()
+    db.refresh(chat)
+    return _chat_out(db, chat, me.id, with_history=True)
+
+
+def _require_member(db: Session, chat_id: str, user_id: str) -> Chat:
+    chat = db.get(Chat, chat_id)
+    if not chat:
+        raise HTTPException(status_code=404, detail="Chat not found")
+    m = (
+        db.query(ChatMember)
+        .filter(and_(ChatMember.chat_id == chat_id, ChatMember.user_id == user_id))
+        .first()
+    )
+    if not m:
+        raise HTTPException(status_code=403, detail="Not a member")
+    return chat
+
+
+@router.get("/{chat_id}", response_model=ChatOut)
+def get_chat(
+    chat_id: str, me: User = Depends(current_user), db: Session = Depends(get_db)
+) -> ChatOut:
+    chat = _require_member(db, chat_id, me.id)
+    return _chat_out(db, chat, me.id, with_history=True)
+
+
+@router.get("/{chat_id}/messages", response_model=list[MessageOut])
+def list_messages(
+    chat_id: str,
+    before: int | None = None,
+    limit: int = 100,
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> list[MessageOut]:
+    _require_member(db, chat_id, me.id)
+    q = db.query(Message).filter(Message.chat_id == chat_id)
+    if before is not None:
+        q = q.filter(Message.created_at < before)
+    rows = q.order_by(Message.created_at.desc()).limit(max(1, min(limit, 500))).all()
+    rows.reverse()
+    rmap = _reactions_by_message(db, [m.id for m in rows], me.id)
+    return [_msg_out(m, viewer_id=me.id, reactions=rmap.get(m.id)) for m in rows]
+
+
+@router.post("/{chat_id}/messages", response_model=MessageOut)
+async def post_message(
+    chat_id: str,
+    body: MessageIn,
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> MessageOut:
+    chat = _require_member(db, chat_id, me.id)
+    mem = (
+        db.query(ChatMember)
+        .filter(ChatMember.chat_id == chat.id, ChatMember.user_id == me.id)
+        .first()
+    )
+    is_admin = bool(mem and mem.role in ("owner", "admin"))
+    if chat.kind == "channel" and not is_admin:
+        raise HTTPException(status_code=403, detail="Only admins can post in channels")
+    if (
+        chat.kind == "group"
+        and bool(getattr(chat, "subscribers_only", False))
+        and not is_admin
+    ):
+        raise HTTPException(status_code=403, detail="Only admins can post (subscribers-only)")
+    slow = int(getattr(chat, "slow_mode_seconds", 0) or 0)
+    if slow > 0 and not is_admin:
+        # Cheapest enforcement: look at the user's most recent post and
+        # reject if it's within the slow-mode window.
+        last_msg = (
+            db.query(Message)
+            .filter(
+                Message.chat_id == chat.id,
+                Message.author_id == me.id,
+                Message.deleted_at.is_(None),
+            )
+            .order_by(Message.created_at.desc())
+            .first()
+        )
+        if last_msg is not None:
+            elapsed_ms = now_ms() - int(last_msg.created_at or 0)
+            if elapsed_ms < slow * 1000:
+                wait_s = max(1, (slow * 1000 - elapsed_ms) // 1000)
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"Slow mode: wait {wait_s}s before posting again",
+                )
+    reply_to_id = None
+    if body.replyToId:
+        ref = db.get(Message, body.replyToId)
+        if ref and ref.chat_id == chat.id:
+            reply_to_id = ref.id
+    # Sealed-sender is only meaningful in DM where the recipient can infer the
+    # sender from chat membership. Reject it elsewhere so callers don't end up
+    # with a permanently-anonymous group/channel post.
+    sealed = bool(body.sealed) and chat.kind == "dm"
+    msg = Message(
+        chat_id=chat.id,
+        author_id=me.id,
+        text=body.text,
+        reply_to_id=reply_to_id,
+        sealed=sealed,
+    )
+    chat.updated_at = msg.created_at or now_ms()
+    db.add(msg)
+    db.add(chat)
+    db.commit()
+    db.refresh(msg)
+    # WebSocket broadcasts use the anonymous projection; the response goes
+    # back to the author themselves and therefore exposes the real authorId.
+    payload = {"type": "message", "chatId": chat.id, "message": _msg_out(msg).model_dump()}
+    await hub.broadcast(chat.id, payload)
+    return _msg_out(msg, viewer_id=me.id)
+
+
+@router.patch("/{chat_id}/messages/{message_id}", response_model=MessageOut)
+async def edit_message(
+    chat_id: str,
+    message_id: str,
+    body: MessagePatch,
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> MessageOut:
+    _require_member(db, chat_id, me.id)
+    msg = db.get(Message, message_id)
+    if not msg or msg.chat_id != chat_id:
+        raise HTTPException(status_code=404, detail="Message not found")
+    if msg.deleted_at:
+        raise HTTPException(status_code=410, detail="Message deleted")
+    if msg.author_id != me.id:
+        raise HTTPException(status_code=403, detail="Cannot edit others' messages")
+    msg.text = body.text
+    if body.sealed is not None:
+        # Sealed flag may toggle if the new ciphertext is sealed but the old
+        # one wasn't (or vice versa); only honour it for DM chats where the
+        # convention applies.
+        chat = db.get(Chat, chat_id)
+        if chat and chat.kind == "dm":
+            msg.sealed = bool(body.sealed)
+    msg.edited_at = now_ms()
+    db.commit()
+    db.refresh(msg)
+    payload = {"type": "message_edited", "chatId": chat_id, "message": _msg_out(msg).model_dump()}
+    await hub.broadcast(chat_id, payload)
+    return _msg_out(msg, viewer_id=me.id)
+
+
+@router.delete("/{chat_id}/messages/{message_id}")
+async def delete_message(
+    chat_id: str,
+    message_id: str,
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    _require_member(db, chat_id, me.id)
+    msg = db.get(Message, message_id)
+    if not msg or msg.chat_id != chat_id:
+        raise HTTPException(status_code=404, detail="Message not found")
+    mem = (
+        db.query(ChatMember)
+        .filter(ChatMember.chat_id == chat_id, ChatMember.user_id == me.id)
+        .first()
+    )
+    is_admin = bool(mem and mem.role in ("owner", "admin"))
+    if msg.author_id != me.id and not is_admin:
+        raise HTTPException(status_code=403, detail="Cannot delete others' messages")
+    if msg.deleted_at:
+        return {"ok": True, "id": message_id}
+    msg.deleted_at = now_ms()
+    msg.text = ""
+    db.commit()
+    payload = {
+        "type": "message_deleted",
+        "chatId": chat_id,
+        "messageId": message_id,
+        "deletedAt": msg.deleted_at,
+    }
+    await hub.broadcast(chat_id, payload)
+    return {"ok": True, "id": message_id}
+
+
+@router.post(
+    "/{chat_id}/messages/{message_id}/reactions",
+    response_model=list[ReactionAggOut],
+)
+async def toggle_reaction(
+    chat_id: str,
+    message_id: str,
+    body: ReactionIn,
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> list[ReactionAggOut]:
+    _require_member(db, chat_id, me.id)
+    msg = db.get(Message, message_id)
+    if not msg or msg.chat_id != chat_id:
+        raise HTTPException(status_code=404, detail="Message not found")
+    if msg.deleted_at:
+        raise HTTPException(status_code=410, detail="Message deleted")
+    emoji = body.emoji.strip()
+    if not emoji:
+        raise HTTPException(status_code=400, detail="Empty emoji")
+
+    existing = (
+        db.query(MessageReaction)
+        .filter(
+            MessageReaction.message_id == message_id,
+            MessageReaction.user_id == me.id,
+            MessageReaction.emoji == emoji,
+        )
+        .first()
+    )
+    if existing:
+        db.delete(existing)
+    else:
+        db.add(
+            MessageReaction(
+                chat_id=chat_id,
+                message_id=message_id,
+                user_id=me.id,
+                emoji=emoji,
+            )
+        )
+    db.commit()
+
+    aggregated = _reactions_by_message(db, [message_id], me.id).get(message_id, [])
+    # Broadcast a viewer-neutral aggregate (no `mine` field bias). Each client
+    # recomputes `mine` locally from the diff event.
+    payload = {
+        "type": "reactions_updated",
+        "chatId": chat_id,
+        "messageId": message_id,
+        "userId": me.id,
+        "emoji": emoji,
+        "added": existing is None,
+    }
+    await hub.broadcast(chat_id, payload)
+    return aggregated
+
+
+@router.patch("/{chat_id}", response_model=ChatOut)
+def update_chat(
+    chat_id: str,
+    body: ChatPatch,
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> ChatOut:
+    chat = _require_member(db, chat_id, me.id)
+    mem = (
+        db.query(ChatMember)
+        .filter(ChatMember.chat_id == chat.id, ChatMember.user_id == me.id)
+        .first()
+    )
+    if not mem or mem.role not in ("owner", "admin"):
+        raise HTTPException(status_code=403, detail="Admin only")
+    if chat.kind == "dm":
+        raise HTTPException(status_code=400, detail="Cannot edit DM")
+    if body.title is not None:
+        chat.title = body.title.strip()[:120]
+    if body.description is not None:
+        chat.description = body.description[:1000]
+    if body.isPublic is not None:
+        chat.is_public = bool(body.isPublic)
+    if body.slowModeSeconds is not None:
+        chat.slow_mode_seconds = int(body.slowModeSeconds)
+    if body.subscribersOnly is not None:
+        chat.subscribers_only = bool(body.subscribersOnly)
+    if body.signedPosts is not None:
+        chat.signed_posts = bool(body.signedPosts)
+    chat.updated_at = now_ms()
+    db.commit()
+    db.refresh(chat)
+    return _chat_out(db, chat, me.id)
+
+
+@router.get("/{chat_id}/members", response_model=list[ChatMemberOut])
+def list_members(
+    chat_id: str,
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> list[ChatMemberOut]:
+    _require_member(db, chat_id, me.id)
+    rows = db.query(ChatMember).filter(ChatMember.chat_id == chat_id).all()
+    return [
+        ChatMemberOut(userId=r.user_id, role=r.role, joinedAt=r.joined_at) for r in rows
+    ]
+
+
+@router.patch("/{chat_id}/members/{user_id}", response_model=ChatMemberOut)
+def patch_member(
+    chat_id: str,
+    user_id: str,
+    body: ChatMemberPatch,
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> ChatMemberOut:
+    chat = _require_member(db, chat_id, me.id)
+    my_mem = (
+        db.query(ChatMember)
+        .filter(ChatMember.chat_id == chat.id, ChatMember.user_id == me.id)
+        .first()
+    )
+    if not my_mem or my_mem.role != "owner":
+        raise HTTPException(status_code=403, detail="Owner only")
+    target = (
+        db.query(ChatMember)
+        .filter(ChatMember.chat_id == chat.id, ChatMember.user_id == user_id)
+        .first()
+    )
+    if not target:
+        raise HTTPException(status_code=404, detail="Member not found")
+    if body.role == "owner":
+        my_mem.role = "admin"
+    target.role = body.role
+    db.commit()
+    return ChatMemberOut(userId=target.user_id, role=target.role, joinedAt=target.joined_at)
+
+
+@router.delete("/{chat_id}/members/{user_id}")
+def remove_member(
+    chat_id: str,
+    user_id: str,
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    chat = _require_member(db, chat_id, me.id)
+    my_mem = (
+        db.query(ChatMember)
+        .filter(ChatMember.chat_id == chat.id, ChatMember.user_id == me.id)
+        .first()
+    )
+    if user_id != me.id and (not my_mem or my_mem.role not in ("owner", "admin")):
+        raise HTTPException(status_code=403, detail="Admin only")
+    target = (
+        db.query(ChatMember)
+        .filter(ChatMember.chat_id == chat.id, ChatMember.user_id == user_id)
+        .first()
+    )
+    if not target:
+        raise HTTPException(status_code=404, detail="Member not found")
+    if target.role == "owner" and target.user_id != me.id:
+        raise HTTPException(status_code=403, detail="Cannot remove owner")
+    db.delete(target)
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/{chat_id}/pin")
+def pin_chat(
+    chat_id: str,
+    pinned: bool = True,
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    _require_member(db, chat_id, me.id)
+    mem = (
+        db.query(ChatMember)
+        .filter(ChatMember.chat_id == chat_id, ChatMember.user_id == me.id)
+        .first()
+    )
+    assert mem is not None
+    mem.pinned = pinned
+    db.commit()
+    return {"ok": True, "pinned": pinned}
+
+
+@router.post("/{chat_id}/mute")
+def mute_chat(
+    chat_id: str,
+    muted: bool = True,
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    _require_member(db, chat_id, me.id)
+    mem = (
+        db.query(ChatMember)
+        .filter(ChatMember.chat_id == chat_id, ChatMember.user_id == me.id)
+        .first()
+    )
+    assert mem is not None
+    mem.muted = muted
+    db.commit()
+    return {"ok": True, "muted": muted}
+
+
+@router.delete("/{chat_id}")
+def delete_chat(
+    chat_id: str, me: User = Depends(current_user), db: Session = Depends(get_db)
+) -> dict:
+    chat = _require_member(db, chat_id, me.id)
+    if chat.created_by != me.id:
+        # non-creator just leaves
+        db.query(ChatMember).filter(
+            ChatMember.chat_id == chat_id, ChatMember.user_id == me.id
+        ).delete()
+    else:
+        db.delete(chat)
+    db.commit()
+    return {"ok": True}
+
+
+@router.websocket("/ws")
+async def chat_ws(websocket: WebSocket, token: str, chatId: str) -> None:
+    await websocket.accept()
+    db = SessionLocal()
+    try:
+        user = user_from_token(token, db)
+        if not user:
+            await websocket.close(code=4401)
+            return
+        chat = db.get(Chat, chatId)
+        if not chat:
+            await websocket.close(code=4404)
+            return
+        member = (
+            db.query(ChatMember)
+            .filter(ChatMember.chat_id == chatId, ChatMember.user_id == user.id)
+            .first()
+        )
+        if not member:
+            await websocket.close(code=4403)
+            return
+    finally:
+        db.close()
+
+    await hub.join(chatId, websocket)
+    try:
+        while True:
+            # we don't process inbound messages (POST /messages is the sole write path),
+            # but we keep the connection alive.
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await hub.leave(chatId, websocket)

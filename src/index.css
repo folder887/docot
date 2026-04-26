@@ -4,6 +4,15 @@
 @tailwind components;
 @tailwind utilities;
 
+::selection {
+  background: var(--ink);
+  color: var(--paper);
+}
+::-moz-selection {
+  background: var(--ink);
+  color: var(--paper);
+}
+
 :root {
   --ink: #000;
   --paper: #fff;
@@ -77,6 +86,22 @@ body,
   color: var(--ink);
   font-family: 'Inter', 'Helvetica Neue', Helvetica, Arial, sans-serif;
   overscroll-behavior-y: none;
+}
+
+/*
+ * Emoji rendering: prefer the platform's native colour-emoji font in a fixed
+ * priority order. macOS / iOS users get the Apple set natively (the closest
+ * match to the requested "iOS style"); Windows gets Segoe UI Emoji, Android
+ * / ChromeOS gets Noto Color Emoji. The fallback to system-emoji keeps the
+ * markup simple and avoids shipping a multi-megabyte sprite sheet for
+ * nothing.
+ */
+.font-emoji,
+.font-emoji * {
+  font-family: 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
+    'Noto Color Emoji', 'Twemoji Mozilla', system-ui, sans-serif;
+  font-style: normal;
+  font-variant-emoji: emoji;
 }
 
 body {
@@ -195,6 +220,98 @@ select {
 @media (min-width: 441px) {
   body {
     background: color-mix(in srgb, var(--paper) 92%, var(--ink));
+  }
+}
+
+/* Desktop layout: > 1024px, side-by-side sidebar + content */
+@media (min-width: 1024px) {
+  .app-shell {
+    max-width: 1280px;
+    height: 100svh;
+    min-height: 100svh;
+    overflow: hidden;
+    flex-direction: row !important;
+    border-left: 2px solid var(--ink);
+    border-right: 2px solid var(--ink);
+  }
+  .app-shell > .desktop-sidebar {
+    width: 240px;
+    flex-shrink: 0;
+    border-right: 2px solid var(--ink);
+    background: var(--paper);
+    display: flex;
+    flex-direction: column;
+  }
+  .app-shell > main {
+    flex: 1;
+    min-width: 0;
+    height: 100svh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .app-shell > main > div {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+  /* Hide bottom tab bar and mobile top bar on desktop */
+  .app-shell > nav.tabbar-bottom,
+  .app-shell > .topbar-mobile {
+    display: none !important;
+  }
+}
+
+/* Hide desktop sidebar on mobile */
+@media (max-width: 1023px) {
+  .desktop-sidebar {
+    display: none !important;
+  }
+}
+
+/* Chats two-pane layout */
+.chats-layout {
+  position: relative;
+}
+.chats-list-pane {
+  width: 100%;
+  flex-shrink: 0;
+  display: flex;
+}
+.chats-detail-pane {
+  display: none;
+}
+.chats-layout[data-detail='true'] .chats-list-pane {
+  display: none;
+}
+.chats-layout[data-detail='true'] .chats-detail-pane {
+  display: flex;
+}
+
+@media (min-width: 1024px) {
+  .chats-list-pane {
+    width: 360px;
+    min-width: 360px;
+    border-right: 2px solid var(--ink);
+    overflow-y: auto;
+    overflow-x: hidden;
+    height: 100%;
+  }
+  .chats-list-pane > div {
+    flex: 1;
+    min-height: 0;
+  }
+  .chats-detail-pane,
+  .chats-layout[data-detail='true'] .chats-list-pane {
+    display: flex;
+  }
+  .chats-layout {
+    flex: 1;
+    min-height: 0;
+  }
+  /* Chats screen header is sticky for the pane scroll, anchor to 0 on desktop */
+  .chats-list-pane .chats-pane-header {
+    top: 0 !important;
   }
 }
 

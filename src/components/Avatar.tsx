@@ -7,8 +7,34 @@ function initials(name: string) {
     .join('')
 }
 
-export function Avatar({ name, size = 44, filled }: { name: string; size?: number; filled?: boolean }) {
+export function Avatar({
+  name,
+  size = 44,
+  filled,
+  src,
+}: {
+  name: string
+  size?: number
+  filled?: boolean
+  /** When set, renders the image and falls back to initials if it fails. */
+  src?: string | null
+}) {
   const style = { width: size, height: size, fontSize: size * 0.38 }
+  if (src) {
+    return (
+      <img
+        src={src}
+        alt={name}
+        style={style}
+        className="flex flex-shrink-0 rounded-full border-2 border-black object-cover"
+        onError={(e) => {
+          // Fall back to initials avatar by clearing the src; the caller will
+          // re-render the image only if a fresh URL becomes available.
+          e.currentTarget.style.display = 'none'
+        }}
+      />
+    )
+  }
   return (
     <div
       style={style}

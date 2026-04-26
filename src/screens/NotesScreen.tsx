@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useApp } from '../store'
 import { relTime, t } from '../i18n'
 import { IconPlus } from '../components/Icons'
+import { PromptDialog } from '../components/Modal'
 import type { Note } from '../types'
 
 export function NotesScreen() {
@@ -10,19 +11,30 @@ export function NotesScreen() {
   const navigate = useNavigate()
   const [query, setQuery] = useState('')
   const [mode, setMode] = useState<'list' | 'graph'>('list')
+  const [creating, setCreating] = useState(false)
+  const [activeTag, setActiveTag] = useState<string | null>(null)
+
+  const tagCounts = useMemo(() => {
+    const m = new Map<string, number>()
+    state.notes.forEach((n) => {
+      n.tags.forEach((tag) => m.set(tag, (m.get(tag) ?? 0) + 1))
+    })
+    return Array.from(m.entries()).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+  }, [state.notes])
 
   const notes = useMemo(() => {
     const q = query.trim().toLowerCase()
     return [...state.notes]
       .filter(
         (n) =>
-          !q ||
-          n.title.toLowerCase().includes(q) ||
-          n.body.toLowerCase().includes(q) ||
-          n.tags.some((tag) => tag.toLowerCase().includes(q)),
+          (!activeTag || n.tags.includes(activeTag)) &&
+          (!q ||
+            n.title.toLowerCase().includes(q) ||
+            n.body.toLowerCase().includes(q) ||
+            n.tags.some((tag) => tag.toLowerCase().includes(q))),
       )
       .sort((a, b) => b.updatedAt - a.updatedAt)
-  }, [state.notes, query])
+  }, [state.notes, query, activeTag])
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-paper">
@@ -37,16 +49,24 @@ export function NotesScreen() {
           <button
             aria-label={t('notes.new', state.lang)}
             className="flex h-[44px] w-[44px] flex-shrink-0 items-center justify-center rounded-xl border-2 border-ink bg-ink text-paper transition-transform active:scale-95"
-            onClick={() => {
-              const title = window.prompt(t('notes.title', state.lang), 'New note')
-              if (title) {
-                const id = addNote(title)
-                navigate(`/notes/${id}`)
-              }
-            }}
+            onClick={() => setCreating(true)}
           >
             <IconPlus size={20} />
           </button>
+          <PromptDialog
+            open={creating}
+            title={t('notes.new', state.lang)}
+            placeholder={t('note.title.placeholder', state.lang)}
+            okLabel={t('common.create', state.lang)}
+            cancelLabel={t('common.cancel', state.lang)}
+            onResolve={async (val) => {
+              setCreating(false)
+              if (val) {
+                const id = await addNote(val)
+                navigate(`/notes/${id}`)
+              }
+            }}
+          />
         </div>
         <div className="flex gap-2">
           <ModeBtn active={mode === 'list'} onClick={() => setMode('list')}>
@@ -56,6 +76,31 @@ export function NotesScreen() {
             {t('notes.graph', state.lang)}
           </ModeBtn>
         </div>
+        {tagCounts.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              className={`rounded-full border-2 border-ink px-2.5 py-0.5 text-[11px] font-bold ${
+                activeTag === null ? 'bg-ink text-paper' : 'bg-paper text-ink'
+              }`}
+              onClick={() => setActiveTag(null)}
+            >
+              {t('notes.allTags', state.lang)}
+            </button>
+            {tagCounts.map(([tag, count]) => (
+              <button
+                key={tag}
+                type="button"
+                className={`rounded-full border-2 border-ink px-2.5 py-0.5 text-[11px] font-bold ${
+                  activeTag === tag ? 'bg-ink text-paper' : 'bg-paper text-ink'
+                }`}
+                onClick={() => setActiveTag(tag === activeTag ? null : tag)}
+              >
+                #{tag} <span className="opacity-60">{count}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {mode === 'list' ? (
@@ -139,6 +184,7 @@ type EdgeSim = { from: string; to: string }
 
 function InteractiveGraph({ notes }: { notes: Note[] }) {
   const navigate = useNavigate()
+  const { state } = useApp()
   const svgRef = useRef<SVGSVGElement>(null)
   const [nodes, setNodes] = useState<NodeSim[]>([])
   const [edges, setEdges] = useState<EdgeSim[]>([])
@@ -147,6 +193,9 @@ function InteractiveGraph({ notes }: { notes: Note[] }) {
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const rafRef = useRef<number | null>(null)
   const panStart = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null)
+  // Track active pointers for pinch-to-zoom
+  const pointers = useRef(new Map<number, { x: number; y: number }>())
+  const pinchStart = useRef<{ dist: number; k: number; tx: number; ty: number; cx: number; cy: number } | null>(null)
 
   /* Build graph when notes change */
   useEffect(() => {
@@ -307,38 +356,77 @@ function InteractiveGraph({ notes }: { notes: Note[] }) {
     setNodes((prev) => prev.map((n) => (n.id === id ? { ...n, fx: null, fy: null } : n)))
   }
 
-  /* Background pan */
+  /* Safe transform setter — guards against NaN/Infinity that can blank the SVG */
+  const safeSetTransform = (next: { x: number; y: number; k: number }) => {
+    const { x, y, k } = next
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(k) || k <= 0) return
+    setTransform({ x, y, k: Math.max(0.4, Math.min(3, k)) })
+  }
+
+  /* Background / pinch handlers */
   const onBgPointerDown = (e: React.PointerEvent) => {
     ;(e.currentTarget as Element).setPointerCapture(e.pointerId)
-    panStart.current = { x: e.clientX, y: e.clientY, tx: transform.x, ty: transform.y }
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    if (pointers.current.size === 2) {
+      const [a, b] = [...pointers.current.values()]
+      const dx = a.x - b.x
+      const dy = a.y - b.y
+      pinchStart.current = {
+        dist: Math.hypot(dx, dy) || 1,
+        k: transform.k,
+        tx: transform.x,
+        ty: transform.y,
+        cx: (a.x + b.x) / 2,
+        cy: (a.y + b.y) / 2,
+      }
+      panStart.current = null
+    } else {
+      panStart.current = { x: e.clientX, y: e.clientY, tx: transform.x, ty: transform.y }
+    }
   }
   const onBgPointerMove = (e: React.PointerEvent) => {
+    if (pointers.current.has(e.pointerId)) {
+      pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    }
+    if (pointers.current.size === 2 && pinchStart.current) {
+      const [a, b] = [...pointers.current.values()]
+      const dist = Math.hypot(a.x - b.x, a.y - b.y) || 1
+      const factor = dist / pinchStart.current.dist
+      const k = pinchStart.current.k * factor
+      // Anchor zoom around pinch midpoint in view coords
+      const { x: ax, y: ay } = screenToView(pinchStart.current.cx, pinchStart.current.cy)
+      safeSetTransform({
+        k,
+        x: pinchStart.current.tx + (ax * pinchStart.current.k - ax * k),
+        y: pinchStart.current.ty + (ay * pinchStart.current.k - ay * k),
+      })
+      return
+    }
     if (!panStart.current) return
     const rect = svgRef.current?.getBoundingClientRect()
-    if (!rect) return
+    if (!rect || rect.width === 0) return
     const scale = 400 / rect.width
     const dx = (e.clientX - panStart.current.x) * scale
     const dy = (e.clientY - panStart.current.y) * scale
-    setTransform((t) => ({ ...t, x: panStart.current!.tx + dx, y: panStart.current!.ty + dy }))
+    safeSetTransform({ k: transform.k, x: panStart.current.tx + dx, y: panStart.current.ty + dy })
   }
   const onBgPointerUp = (e: React.PointerEvent) => {
     ;(e.currentTarget as Element).releasePointerCapture?.(e.pointerId)
-    panStart.current = null
+    pointers.current.delete(e.pointerId)
+    if (pointers.current.size < 2) pinchStart.current = null
+    if (pointers.current.size === 0) panStart.current = null
   }
 
-  /* Zoom */
+  /* Wheel zoom (desktop) */
   const onWheel = (e: React.WheelEvent) => {
     e.preventDefault()
     const { x, y } = screenToView(e.clientX, e.clientY)
     const factor = e.deltaY < 0 ? 1.1 : 0.9
-    setTransform((t) => {
-      const k = Math.max(0.4, Math.min(3, t.k * factor))
-      // keep cursor anchored
-      return {
-        k,
-        x: t.x + (x * t.k - x * k),
-        y: t.y + (y * t.k - y * k),
-      }
+    const k = transform.k * factor
+    safeSetTransform({
+      k,
+      x: transform.x + (x * transform.k - x * k),
+      y: transform.y + (y * transform.k - y * k),
     })
   }
 
@@ -429,7 +517,7 @@ function InteractiveGraph({ notes }: { notes: Note[] }) {
       </svg>
 
       <div className="pointer-events-none absolute bottom-2 left-2 right-2 flex justify-between text-[10px] font-bold uppercase tracking-[0.2em] text-muted">
-        <span>drag nodes · pan bg · wheel zoom</span>
+        <span>{t('graph.controls', state.lang)}</span>
         <span>{Math.round(transform.k * 100)}%</span>
       </div>
     </div>

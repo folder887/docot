@@ -3,9 +3,12 @@ import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { AppProvider, useApp } from './store'
 import { SplashScreen } from './screens/SplashScreen'
 import { WelcomeScreen } from './screens/WelcomeScreen'
-import { OnboardingScreen } from './screens/OnboardingScreen'
-import { ChatsScreen } from './screens/ChatsScreen'
+import { SignupScreen } from './screens/SignupScreen'
+import { LoginScreen } from './screens/LoginScreen'
+import { ChatsLayout } from './screens/ChatsLayout'
 import { ChatDetailScreen } from './screens/ChatDetailScreen'
+import { InviteScreen } from './screens/InviteScreen'
+import { UserHandleRedirect } from './screens/UserHandleRedirect'
 import { CalendarScreen } from './screens/CalendarScreen'
 import { NotesScreen } from './screens/NotesScreen'
 import { NoteDetailScreen } from './screens/NoteDetailScreen'
@@ -15,8 +18,10 @@ import { SettingsScreen } from './screens/SettingsScreen'
 import { SettingsSubScreen } from './screens/SettingsSubScreens'
 import { ProfileScreen } from './screens/ProfileScreen'
 import { GroupInfoScreen } from './screens/GroupInfoScreen'
-import { TabBar } from './components/TabBar'
+import { TabBar, DesktopSidebar } from './components/TabBar'
 import { TopBar } from './components/TopBar'
+import { ToastHost } from './components/Toast'
+import { PasscodeLockGate } from './components/PasscodeLockGate'
 
 const TOP_TAB_ROUTES = ['/chats', '/calendar', '/notes', '/news', '/menu']
 
@@ -41,26 +46,35 @@ function ThemeSync() {
 function Shell() {
   const { pathname, key } = useLocation()
   const isTopTab = TOP_TAB_ROUTES.includes(pathname)
-  const hideChrome = pathname === '/' || pathname === '/welcome' || pathname === '/onboarding'
+  const hideChrome =
+    pathname === '/' ||
+    pathname === '/welcome' ||
+    pathname === '/signup' ||
+    pathname === '/login'
 
   return (
     <div className="app-shell flex flex-col">
+      {!hideChrome && <DesktopSidebar />}
       {!hideChrome && isTopTab && <TopBar />}
       <main className="flex flex-1 flex-col min-h-0">
         <div key={key} className="page-enter flex flex-1 flex-col min-h-0">
           <Routes>
             <Route path="/" element={<SplashScreen />} />
             <Route path="/welcome" element={<WelcomeScreen />} />
-            <Route path="/onboarding" element={<OnboardingScreen />} />
+            <Route path="/signup" element={<SignupScreen />} />
+            <Route path="/login" element={<LoginScreen />} />
             <Route path="/menu" element={<MenuScreen />} />
-            <Route path="/chats" element={<ChatsScreen />} />
-            <Route path="/chats/:id" element={<ChatDetailScreen />} />
+            <Route path="/chats" element={<ChatsLayout />}>
+              <Route path=":id" element={<ChatDetailScreen />} />
+            </Route>
             <Route path="/calendar" element={<CalendarScreen />} />
             <Route path="/notes" element={<NotesScreen />} />
             <Route path="/notes/:id" element={<NoteDetailScreen />} />
             <Route path="/news" element={<NewsScreen />} />
             <Route path="/profile/:id" element={<ProfileScreen />} />
+            <Route path="/u/:handle" element={<UserHandleRedirect />} />
             <Route path="/group/:id" element={<GroupInfoScreen />} />
+            <Route path="/invite/:token" element={<InviteScreen />} />
             <Route path="/settings" element={<SettingsScreen />} />
             <Route path="/settings/:section" element={<SettingsSubScreen />} />
             <Route path="*" element={<Navigate to="/" replace />} />
@@ -75,11 +89,17 @@ function Shell() {
 function Guarded() {
   const { state } = useApp()
   const { pathname } = useLocation()
-  const needsOnboarding = !state.onboarded
-  const publicRoutes = ['/', '/welcome', '/onboarding']
+  const publicRoutes = ['/', '/welcome', '/signup', '/login']
+  const isInvitePath = pathname.startsWith('/invite/')
 
-  if (needsOnboarding && !publicRoutes.includes(pathname)) {
-    return <Navigate to="/welcome" replace />
+  if (state.status === 'loading') {
+    return <Shell />
+  }
+  if (state.status !== 'authed' && !publicRoutes.includes(pathname) && !isInvitePath) {
+    return <Navigate to={`/welcome?next=${encodeURIComponent(pathname)}`} replace />
+  }
+  if (state.status === 'authed' && publicRoutes.includes(pathname) && pathname !== '/') {
+    return <Navigate to="/chats" replace />
   }
   return <Shell />
 }
@@ -88,7 +108,10 @@ export default function App() {
   return (
     <AppProvider>
       <ThemeSync />
-      <Guarded />
+      <PasscodeLockGate>
+        <Guarded />
+      </PasscodeLockGate>
+      <ToastHost />
     </AppProvider>
   )
 }

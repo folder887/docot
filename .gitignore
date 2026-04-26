@@ -5,3 +5,23 @@ dist/
 .DS_Store
 .env
 .env.local
+
+# Tauri
+src-tauri/target/
+src-tauri/gen/
+
+# Capacitor / Android
+android/.gradle/
+android/build/
+android/app/build/
+android/app/release/
+android/local.properties
+android/captures/
+android/.idea/
+android/gradle/wrapper/gradle-wrapper.jar
+
+# iOS
+ios/App/build/
+ios/Pods/
+ios/.idea/
+DerivedData/
