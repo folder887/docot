@@ -18,15 +18,23 @@ _UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 _MAX_BYTES = 25 * 1024 * 1024  # 25 MB
 _CHUNK = 64 * 1024
-_ALLOWED_PREFIXES = ("audio/", "image/", "video/")
-_ALLOWED_NAMES = {"application/octet-stream"}
 
-# Extensions whose served Content-Type could execute in a browser context.
-# We force these to a safe inline-disable type even if mimetypes would label
-# them text/html, application/xhtml+xml, image/svg+xml, etc.
-_DANGEROUS_EXTS = {
-    "html", "htm", "xhtml", "xml", "svg", "js", "mjs", "cjs",
-    "wasm", "css", "pdf",
+# Allow-list of upload content types. We deliberately do NOT accept
+# `application/octet-stream` because it is the universal escape hatch a
+# malicious client would use to bypass any prefix check (the browser would
+# then happily store and re-serve the file). Only real media MIME types are
+# accepted; anything else is rejected at upload time.
+_ALLOWED_PREFIXES = ("audio/", "image/", "video/")
+_ALLOWED_EXACT: set[str] = set()
+
+# Allow-list of extensions we are willing to serve with their real MIME type.
+# Anything not on this list is forced to `application/octet-stream` +
+# `Content-Disposition: attachment` at download time, so even if a malicious
+# upload slipped through it cannot execute in the browser.
+_SAFE_DOWNLOAD_EXTS = {
+    "png", "jpg", "jpeg", "gif", "webp", "bmp", "ico",
+    "mp4", "webm", "mov", "m4v", "ogv",
+    "mp3", "ogg", "oga", "wav", "m4a", "aac", "flac", "opus",
 }
 
 
@@ -48,7 +56,7 @@ async def upload_file(
     user: User = Depends(current_user),
 ) -> dict:
     ct = (file.content_type or "").lower()
-    if not (ct.startswith(_ALLOWED_PREFIXES) or ct in _ALLOWED_NAMES):
+    if not (ct.startswith(_ALLOWED_PREFIXES) or ct in _ALLOWED_EXACT):
         raise HTTPException(status_code=415, detail=f"Unsupported media type: {ct}")
 
     # Stream the upload to disk in chunks, aborting as soon as the cap is hit
@@ -100,14 +108,15 @@ async def upload_file(
 
 
 def _safe_media_type(name: str) -> str:
+    """Only serve allow-listed extensions with their real MIME type. Anything
+    else (including unknown / future MIME types) is forced to
+    `application/octet-stream` and downloaded as an attachment by the caller.
+    """
     ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
-    if ext in _DANGEROUS_EXTS:
+    if ext not in _SAFE_DOWNLOAD_EXTS:
         return "application/octet-stream"
     guessed, _ = mimetypes.guess_type(name)
     if not guessed:
-        return "application/octet-stream"
-    # Belt-and-braces: never serve as something the browser will render as a doc.
-    if guessed.startswith(("text/html", "application/xhtml", "image/svg")):
         return "application/octet-stream"
     return guessed
 

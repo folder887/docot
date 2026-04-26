@@ -183,9 +183,22 @@ function deanonymise(me: User, chatLike: { kind: string; participants: string[] 
 // when `decryptHistory` and `addIncomingMessage` race for the same message
 // id (e.g. the chat-list `lastMessage` preview decryption running in parallel
 // with the chat detail screen's history walk). The Map holds a single
-// pending Promise<string> per message; concurrent callers all await that one
-// resolution rather than each calling `decryptWhisperMessage` separately.
+// pending Promise<string> per (messageId+ciphertext-fingerprint); concurrent
+// callers with the same ciphertext share one resolution. Edits reuse the
+// message id but ship a different ciphertext, so they get a distinct key
+// and avoid returning the stale plaintext from the original ratchet step.
 const inflightDecrypts = new Map<string, Promise<string>>()
+
+function _ctFingerprint(text: string): string {
+  // Cheap, allocation-light hash over the ciphertext. We just need different
+  // edits of the same message to land on different keys; collision risk is a
+  // non-issue because messages are scoped per (id+fingerprint) and different
+  // ciphertexts will diverge in the first dozen bytes anyway.
+  let h = 5381
+  const len = Math.min(text.length, 64)
+  for (let i = 0; i < len; i++) h = ((h << 5) + h + text.charCodeAt(i)) | 0
+  return `${text.length}:${h.toString(36)}`
+}
 
 function decryptOnce(
   messageId: string,
@@ -193,16 +206,17 @@ function decryptOnce(
   authorId: string,
   text: string,
 ): Promise<string> {
-  const existing = inflightDecrypts.get(messageId)
+  const key = `${messageId}|${_ctFingerprint(text)}`
+  const existing = inflightDecrypts.get(key)
   if (existing) return existing
   const pending = (async () => {
     try {
       return await maybeDecrypt(myId, authorId, text)
     } finally {
-      inflightDecrypts.delete(messageId)
+      inflightDecrypts.delete(key)
     }
   })()
-  inflightDecrypts.set(messageId, pending)
+  inflightDecrypts.set(key, pending)
   return pending
 }
 
