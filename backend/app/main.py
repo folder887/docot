@@ -38,8 +38,13 @@ _MIGRATIONS: list[tuple[str, str, str]] = [
     ("messages", "reply_to_id", "VARCHAR"),
     ("messages", "sealed", "INTEGER NOT NULL DEFAULT 0"),
     ("users", "avatar_url", "VARCHAR(500) NOT NULL DEFAULT ''"),
+    ("users", "avatar_svg", "TEXT NOT NULL DEFAULT ''"),
+    ("users", "status", "VARCHAR(140) NOT NULL DEFAULT ''"),
+    ("users", "presence", "VARCHAR(16) NOT NULL DEFAULT 'everyone'"),
     ("users", "links", "TEXT NOT NULL DEFAULT ''"),
     ("users", "bot_owner_id", "VARCHAR NOT NULL DEFAULT ''"),
+    ("messages", "pinned", "INTEGER NOT NULL DEFAULT 0"),
+    ("messages", "pinned_at", "INTEGER"),
     ("posts", "community_id", "VARCHAR NOT NULL DEFAULT ''"),
     ("posts", "title", "VARCHAR(300) NOT NULL DEFAULT ''"),
 ]

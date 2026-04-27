@@ -106,7 +106,38 @@ export function ChatComposer({
   chatId,
 }: Props) {
   const { state } = useApp()
-  const [text, setText] = useState('')
+  const draftKey = chatId ? `docot:draft:${chatId}` : null
+  const [text, setText] = useState<string>(() => {
+    if (!draftKey) return ''
+    try {
+      return localStorage.getItem(draftKey) ?? ''
+    } catch {
+      return ''
+    }
+  })
+
+  // Persist outgoing text per chat. Cleared after send/cancel-edit.
+  useEffect(() => {
+    if (!draftKey) return
+    try {
+      if (text) localStorage.setItem(draftKey, text)
+      else localStorage.removeItem(draftKey)
+    } catch {
+      /* quota exceeded — drop silently */
+    }
+  }, [draftKey, text])
+
+  // Switching to another chat — load that chat's draft.
+  useEffect(() => {
+    if (!draftKey) return
+    try {
+      const saved = localStorage.getItem(draftKey)
+      setText(saved ?? '')
+    } catch {
+      /* ignore */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftKey])
 
   useEffect(() => {
     if (!editing) return

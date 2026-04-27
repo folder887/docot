@@ -1,11 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { useApp } from '../store'
 import { t } from '../i18n'
-import type { Theme, Wallpaper } from '../types'
+import type { Theme, Wallpaper, User } from '../types'
 import { ScreenHeader } from '../components/ScreenHeader'
 import { QRCode } from '../components/QRCode'
 import { Avatar } from '../components/Avatar'
+import { AvatarBuilder } from '../components/AvatarBuilder'
+import { encodeAvatarConfig, decodeAvatarConfig } from '../components/AvatarSVG'
+import { Modal } from '../components/Modal'
+import { api } from '../api'
 
 export function SettingsSubScreen() {
   const { section } = useParams<{ section: string }>()
@@ -724,7 +728,8 @@ function DevicesList({ userId }: { userId: string | null }) {
 
 /* ------------ BATTERY & ANIMATIONS ------------ */
 function EditProfileSection() {
-  const { state, updateMe } = useApp()
+  const { state, updateMe, logout } = useApp()
+  const navigate = useNavigate()
   const me = state.me
   const lang = state.lang
   const [name, setName] = useState(me?.name ?? '')
@@ -732,9 +737,17 @@ function EditProfileSection() {
   const [phone, setPhone] = useState(me?.phone ?? '')
   const [links, setLinks] = useState<string[]>(me?.links?.length ? me.links : [''])
   const [avatarUrl, setAvatarUrl] = useState<string | null>(me?.avatarUrl ?? null)
+  const [avatarSvg, setAvatarSvg] = useState<string | null>(me?.avatarSvg ?? null)
+  const [status, setStatus] = useState(me?.status ?? '')
+  const [presence, setPresence] = useState<'everyone' | 'contacts' | 'nobody'>(
+    me?.presence ?? 'everyone',
+  )
   const [busy, setBusy] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
+  const [builderOpen, setBuilderOpen] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [blocked, setBlocked] = useState<User[] | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
   const setLink = (i: number, v: string) =>
@@ -773,6 +786,9 @@ function EditProfileSection() {
         bio,
         phone,
         avatarUrl,
+        avatarSvg,
+        status,
+        presence,
         links: cleanedLinks,
       })
       setMsg(t('settings.saved', lang))
@@ -784,6 +800,47 @@ function EditProfileSection() {
     }
   }
 
+  const loadBlocked = async () => {
+    try {
+      const list = await api.listBlocked()
+      setBlocked(
+        list.map(
+          (u): User => ({
+            id: u.id,
+            handle: u.handle,
+            name: u.name,
+            kind: (u.kind as User['kind']) ?? 'user',
+            bio: u.bio ?? '',
+            phone: u.phone ?? '',
+            avatarUrl: u.avatarUrl ?? null,
+            avatarSvg: u.avatarSvg ?? null,
+            status: u.status ?? '',
+            presence: (u.presence as User['presence']) ?? 'everyone',
+            links: u.links ?? [],
+            lastSeen: u.lastSeen ?? undefined,
+            blocked: true,
+          }),
+        ),
+      )
+    } catch {
+      setBlocked([])
+    }
+  }
+
+  const onUnblock = async (uid: string) => {
+    try {
+      await api.unblock(uid)
+      setBlocked((arr) => (arr ?? []).filter((u) => u.id !== uid))
+    } catch {
+      /* ignore */
+    }
+  }
+
+  useEffect(() => {
+    void loadBlocked()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   if (!me) return <div className="p-6 text-muted">…</div>
 
   return (
@@ -791,7 +848,7 @@ function EditProfileSection() {
       <SectionHeader text={t('settings.editProfile', lang)} />
 
       <div className="mb-4 flex items-center gap-4">
-        <Avatar name={name || me.handle} size={72} src={avatarUrl} />
+        <Avatar name={name || me.handle} size={72} src={avatarUrl} svgConfig={avatarSvg} />
         <div className="flex flex-col gap-2">
           <input
             ref={fileRef}
@@ -802,16 +859,26 @@ function EditProfileSection() {
           />
           <button
             type="button"
+            onClick={() => setBuilderOpen(true)}
+            className="rounded-full border-2 border-ink bg-ink px-4 py-2 text-sm font-bold text-paper"
+          >
+            {t('avatar.build', lang)}
+          </button>
+          <button
+            type="button"
             onClick={() => fileRef.current?.click()}
             disabled={uploading}
             className="rounded-full border-2 border-ink px-4 py-2 text-sm font-bold disabled:opacity-50"
           >
             {uploading ? '…' : t('profile.changeAvatar', lang)}
           </button>
-          {avatarUrl && (
+          {(avatarUrl || avatarSvg) && (
             <button
               type="button"
-              onClick={() => setAvatarUrl(null)}
+              onClick={() => {
+                setAvatarUrl(null)
+                setAvatarSvg(null)
+              }}
               className="rounded-full border-2 border-ink/40 px-4 py-2 text-sm font-bold text-ink/70"
             >
               {t('profile.removeAvatar', lang)}
@@ -819,6 +886,15 @@ function EditProfileSection() {
           )}
         </div>
       </div>
+      <AvatarBuilder
+        open={builderOpen}
+        initial={decodeAvatarConfig(avatarSvg)}
+        onClose={() => setBuilderOpen(false)}
+        onSave={(cfg) => {
+          setAvatarSvg(encodeAvatarConfig(cfg))
+          setBuilderOpen(false)
+        }}
+      />
 
       <label className="mb-2 mt-3 block text-xs font-bold uppercase tracking-wider text-ink/60">
         {t('profile.name', lang)}
@@ -827,6 +903,17 @@ function EditProfileSection() {
         value={name}
         onChange={(e) => setName(e.target.value)}
         maxLength={80}
+        className="w-full rounded-xl border-2 border-ink bg-paper px-3 py-2 text-base focus:outline-none"
+      />
+
+      <label className="mb-2 mt-4 block text-xs font-bold uppercase tracking-wider text-ink/60">
+        {t('profile.status', lang)}
+      </label>
+      <input
+        value={status}
+        onChange={(e) => setStatus(e.target.value)}
+        maxLength={140}
+        placeholder={t('profile.statusPlaceholder', lang)}
         className="w-full rounded-xl border-2 border-ink bg-paper px-3 py-2 text-base focus:outline-none"
       />
 
@@ -840,6 +927,24 @@ function EditProfileSection() {
         rows={3}
         className="w-full resize-none rounded-xl border-2 border-ink bg-paper px-3 py-2 text-base focus:outline-none"
       />
+
+      <label className="mb-2 mt-4 block text-xs font-bold uppercase tracking-wider text-ink/60">
+        {t('profile.presence', lang)}
+      </label>
+      <div className="flex gap-2">
+        {(['everyone', 'contacts', 'nobody'] as const).map((p) => (
+          <button
+            key={p}
+            type="button"
+            onClick={() => setPresence(p)}
+            className={`flex-1 rounded-full border-2 border-ink px-3 py-2 text-sm font-bold ${
+              presence === p ? 'bg-ink text-paper' : ''
+            }`}
+          >
+            {t(`profile.presence.${p}`, lang)}
+          </button>
+        ))}
+      </div>
 
       <label className="mb-2 mt-4 block text-xs font-bold uppercase tracking-wider text-ink/60">
         {t('profile.phone', lang)}
@@ -895,7 +1000,120 @@ function EditProfileSection() {
         {busy ? '…' : t('common.save', lang)}
       </button>
       {msg && <p className="mt-3 text-center text-sm">{msg}</p>}
+
+      {blocked && blocked.length > 0 && (
+        <>
+          <div className="mt-8 mb-2 text-xs font-bold uppercase tracking-wider text-ink/60">
+            {t('profile.blocked', lang)}
+          </div>
+          <ul className="flex flex-col gap-2">
+            {blocked.map((u) => (
+              <li
+                key={u.id}
+                className="flex items-center gap-3 rounded-xl border-2 border-ink px-3 py-2"
+              >
+                <Avatar
+                  name={u.name}
+                  src={u.avatarUrl}
+                  svgConfig={u.avatarSvg}
+                  size={36}
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-black">{u.name}</div>
+                  <div className="truncate text-[11px] text-ink/60">@{u.handle}</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void onUnblock(u.id)}
+                  className="rounded-full border-2 border-ink px-3 py-1 text-xs font-bold"
+                >
+                  {t('profile.unblock', lang)}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      <button
+        type="button"
+        onClick={() => setDeleteOpen(true)}
+        className="mt-8 w-full rounded-full border-2 border-ink/60 bg-paper py-3 text-sm font-bold text-ink/80 underline decoration-ink underline-offset-4"
+      >
+        {t('profile.deleteAccount', lang)}
+      </button>
+
+      <DeleteAccountModal
+        open={deleteOpen}
+        handle={me.handle}
+        onClose={() => setDeleteOpen(false)}
+        onConfirmed={() => {
+          setDeleteOpen(false)
+          logout()
+          navigate('/welcome', { replace: true })
+        }}
+      />
     </div>
+  )
+}
+
+function DeleteAccountModal({
+  open,
+  handle,
+  onClose,
+  onConfirmed,
+}: {
+  open: boolean
+  handle: string
+  onClose: () => void
+  onConfirmed: () => void
+}) {
+  const { state } = useApp()
+  const lang = state.lang
+  const [typed, setTyped] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const ok = typed.trim().toLowerCase().replace(/^@/, '') === handle.toLowerCase()
+  return (
+    <Modal open={open} onClose={onClose} title={t('profile.deleteAccount', lang)} align="center">
+      <p className="mb-3 text-sm">{t('profile.deleteConfirm', lang)}</p>
+      <input
+        autoFocus
+        value={typed}
+        onChange={(e) => setTyped(e.target.value)}
+        placeholder={`@${handle}`}
+        className="mb-3 w-full rounded-xl border-2 border-ink bg-paper px-3 py-2 text-base focus:outline-none"
+      />
+      {err && <p className="mb-2 text-sm text-red-700">{err}</p>}
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={onClose}
+          className="flex-1 rounded-full border-2 border-ink px-3 py-2 text-sm font-bold"
+        >
+          {t('common.cancel', lang)}
+        </button>
+        <button
+          type="button"
+          disabled={!ok || busy}
+          onClick={async () => {
+            setBusy(true)
+            setErr(null)
+            try {
+              await api.deleteAccount(typed.trim())
+              onConfirmed()
+            } catch (e) {
+              setErr(e instanceof Error ? e.message : 'Failed')
+            } finally {
+              setBusy(false)
+            }
+          }}
+          className="flex-1 rounded-full border-2 border-ink bg-ink px-3 py-2 text-sm font-bold text-paper disabled:opacity-40"
+        >
+          {busy ? '…' : t('common.delete', lang)}
+        </button>
+      </div>
+    </Modal>
   )
 }
 

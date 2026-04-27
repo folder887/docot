@@ -45,6 +45,9 @@ class UserOut(BaseModel):
     kind: str = "user"
     phone: str = ""
     avatarUrl: str | None = None
+    avatarSvg: str | None = None
+    status: str | None = None
+    presence: str = "everyone"
     links: list[str] = []
     lastSeen: int | None = None
     isContact: bool = False
@@ -59,6 +62,9 @@ class UserUpdateIn(BaseModel):
     bio: str | None = None
     phone: str | None = None
     avatarUrl: str | None = Field(default=None, max_length=500)
+    avatarSvg: str | None = Field(default=None, max_length=4000)
+    status: str | None = Field(default=None, max_length=140)
+    presence: str | None = Field(default=None, pattern="^(everyone|contacts|nobody)$")
     links: list[str] | None = Field(default=None, max_length=10)
 
 
@@ -77,6 +83,8 @@ class MessageOut(BaseModel):
     deletedAt: int | None = None
     replyToId: str | None = None
     sealed: bool = False
+    pinned: bool = False
+    pinnedAt: int | None = None
     reactions: list[ReactionAggOut] = []
 
     class Config:

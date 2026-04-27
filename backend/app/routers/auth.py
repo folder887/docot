@@ -18,6 +18,9 @@ def _user_to_out(u: User) -> UserOut:
     raw_links = (getattr(u, "links", "") or "").split("\n")
     links = [ln.strip() for ln in raw_links if ln and ln.strip()]
     avatar_url = getattr(u, "avatar_url", "") or None
+    avatar_svg = getattr(u, "avatar_svg", "") or None
+    status = getattr(u, "status", "") or None
+    presence = getattr(u, "presence", "everyone") or "everyone"
     return UserOut(
         id=u.id,
         handle=u.handle,
@@ -26,6 +29,9 @@ def _user_to_out(u: User) -> UserOut:
         kind=u.kind,
         phone=u.phone,
         avatarUrl=avatar_url,
+        avatarSvg=avatar_svg,
+        status=status,
+        presence=presence,
         links=links,
         lastSeen=u.last_seen_at,
     )

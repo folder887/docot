@@ -30,7 +30,7 @@ function applySystemFolder(
 }
 
 export function ChatsScreen() {
-  const { state, peerOf, createChat, searchUsers } = useApp()
+  const { state, peerOf, createChat, searchUsers, openSavedChat } = useApp()
   const navigate = useNavigate()
   const [folder, setFolder] = useState('all')
   const [query, setQuery] = useState('')
@@ -40,6 +40,9 @@ export function ChatsScreen() {
   const [foldersOpen, setFoldersOpen] = useState(false)
   const [newBotOpen, setNewBotOpen] = useState(false)
   const [globalResults, setGlobalResults] = useState<User[]>([])
+  const [messageHits, setMessageHits] = useState<
+    Array<{ chatId: string; messageId: string; chatTitle: string; preview: string; at: number }>
+  >([])
   const [searching, setSearching] = useState(false)
 
   const userKindOfPeer = (c: Chat) => peerOf(c)?.kind ?? 'user'
@@ -48,23 +51,47 @@ export function ChatsScreen() {
   useEffect(() => {
     const q = query.trim()
     if (q.length < 1) {
-      const reset = window.setTimeout(() => setGlobalResults([]), 0)
+      const reset = window.setTimeout(() => {
+        setGlobalResults([])
+        setMessageHits([])
+      }, 0)
       return () => window.clearTimeout(reset)
     }
     const startSearch = window.setTimeout(() => setSearching(true), 0)
-    const h = window.setTimeout(() => {
-      void searchUsers(q)
-        .then((users) => {
-          const meId = state.me?.id
-          setGlobalResults(users.filter((u) => u.id !== meId))
-        })
-        .finally(() => setSearching(false))
+    const h = window.setTimeout(async () => {
+      try {
+        const users = await searchUsers(q)
+        const meId = state.me?.id
+        setGlobalResults(users.filter((u) => u.id !== meId))
+      } catch {
+        /* ignore */
+      }
+      if (q.length >= 2) {
+        try {
+          const { api } = await import('../api')
+          const hits = await api.searchMessages(q)
+          setMessageHits(
+            hits.slice(0, 30).map((h) => ({
+              chatId: h.chatId,
+              messageId: h.message.id,
+              chatTitle: h.chatTitle,
+              preview: h.message.text || '',
+              at: h.message.at,
+            })),
+          )
+        } catch {
+          setMessageHits([])
+        }
+      } else {
+        setMessageHits([])
+      }
+      setSearching(false)
     }, 200)
     return () => {
       window.clearTimeout(startSearch)
       window.clearTimeout(h)
     }
-  }, [query, searchUsers, state.me?.id])
+  }, [query, searchUsers, state.me?.id, state.chats])
 
   const visible = useMemo(() => {
     const filtered = applySystemFolder(state.chats, folder, state.folders, userKindOfPeer)
@@ -136,6 +163,18 @@ export function ChatsScreen() {
                   onClick: () => setNewBotOpen(true),
                 },
                 {
+                  label: t('savedMessages.title', state.lang),
+                  icon: <IconUser size={18} />,
+                  onClick: async () => {
+                    try {
+                      const id = await openSavedChat()
+                      navigate(`/chat/${id}`)
+                    } catch {
+                      /* ignore */
+                    }
+                  },
+                },
+                {
                   label: t('settings.folders', state.lang),
                   icon: <IconFolder size={18} />,
                   onClick: () => setFoldersOpen(true),
@@ -180,6 +219,28 @@ export function ChatsScreen() {
           onPick={onPickUser}
           lang={state.lang}
         />
+      )}
+
+      {query && messageHits.length > 0 && (
+        <div className="border-b-2 border-ink">
+          <div className="px-4 py-2 text-[11px] font-bold uppercase tracking-wider text-ink/60">
+            {t('search.global', state.lang)}
+          </div>
+          <ul>
+            {messageHits.map((h) => (
+              <li key={h.messageId}>
+                <button
+                  type="button"
+                  onClick={() => navigate(`/chats/${h.chatId}`)}
+                  className="row-press flex w-full flex-col gap-0.5 px-4 py-2 text-left"
+                >
+                  <span className="truncate text-[12px] font-black">{h.chatTitle}</span>
+                  <span className="line-clamp-2 text-sm">{h.preview}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
 
       {pinned.length > 0 && (
@@ -656,6 +717,12 @@ function lastMessagePreview(text: string, lang: 'en' | 'ru'): string {
 
 function ChatRow({ chat, lang }: { chat: Chat; lang: 'en' | 'ru' }) {
   const last = chat.lastMessage ?? chat.messages[chat.messages.length - 1]
+  let draft = ''
+  try {
+    draft = localStorage.getItem(`docot:draft:${chat.id}`) ?? ''
+  } catch {
+    /* ignore */
+  }
   return (
     <li className="border-b border-ink/15">
       <Link to={`/chats/${chat.id}`} className="flex gap-3 px-4 py-3 hover:bg-ink hover:text-paper">
@@ -672,7 +739,14 @@ function ChatRow({ chat, lang }: { chat: Chat; lang: 'en' | 'ru' }) {
                 {chat.kind}
               </span>
             )}
-            <span className="truncate">{last ? lastMessagePreview(last.text, lang) : ' '}</span>
+            {draft ? (
+              <span className="truncate">
+                <span className="font-bold text-rose-700">{t('common.draft', lang)}: </span>
+                {draft}
+              </span>
+            ) : (
+              <span className="truncate">{last ? lastMessagePreview(last.text, lang) : ' '}</span>
+            )}
           </div>
         </div>
       </Link>

@@ -30,6 +30,8 @@ export function ChatDetailScreen() {
     applyMessageEdit,
     applyMessageDelete,
     toggleReaction,
+    pinMessage,
+    applyMessagePin,
     applyReactionEvent,
   } = useApp()
   const navigate = useNavigate()
@@ -97,6 +99,7 @@ export function ChatDetailScreen() {
           emoji?: string
           added?: boolean
           pollId?: string
+          pinnedAt?: number | null
         }
         if (data.type === 'message' && data.message) {
           const incoming = data.message
@@ -132,6 +135,16 @@ export function ChatDetailScreen() {
             data.userId,
             data.emoji,
             !!data.added,
+          )
+        } else if (
+          (data.type === 'message_pinned' || data.type === 'message_unpinned') &&
+          data.messageId
+        ) {
+          applyMessagePin(
+            chat.id,
+            data.messageId,
+            data.type === 'message_pinned',
+            data.pinnedAt ?? null,
           )
         }
       } catch {
@@ -216,6 +229,14 @@ export function ChatDetailScreen() {
             </div>
           </button>
         }
+      />
+      <PinnedBar
+        chat={chat}
+        onJump={(mid) => {
+          const el = document.getElementById(`msg-${mid}`)
+          el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        }}
+        onUnpin={(mid) => void pinMessage(chat.id, mid, false)}
       />
       <div className="chat-wallpaper flex flex-1 flex-col gap-2 overflow-y-auto px-3 py-4">
         <div className="wallpaper" />
@@ -398,6 +419,13 @@ export function ChatDetailScreen() {
               />
             )}
             <Sheet
+              label={t(actionFor.pinned ? 'msg.unpin' : 'msg.pin', state.lang)}
+              onClick={() => {
+                void pinMessage(chat.id, actionFor.id, !actionFor.pinned)
+                setActionFor(null)
+              }}
+            />
+            <Sheet
               destructive
               label={t('msg.delete', state.lang)}
               onClick={() => {
@@ -498,5 +526,49 @@ function ForwardSheet({
         {t('common.close', state.lang)}
       </button>
     </Modal>
+  )
+}
+
+function PinnedBar({
+  chat,
+  onJump,
+  onUnpin,
+}: {
+  chat: { id: string; messages: Message[]; kind: string }
+  onJump: (messageId: string) => void
+  onUnpin: (messageId: string) => void
+}) {
+  const { state } = useApp()
+  const pins = chat.messages.filter((m) => m.pinned && !m.deletedAt)
+  const [idx, setIdx] = useState(0)
+  if (pins.length === 0) return null
+  const safeIdx = Math.min(idx, pins.length - 1)
+  const m = pins[safeIdx]
+  return (
+    <div className="flex items-center gap-2 border-b-2 border-ink bg-paper px-3 py-1.5 text-xs">
+      <span className="text-base" aria-hidden>📌</span>
+      <button
+        type="button"
+        onClick={() => {
+          onJump(m.id)
+          setIdx((i) => (i + 1) % pins.length)
+        }}
+        className="min-w-0 flex-1 truncate text-left"
+      >
+        <span className="font-black">{t('msg.pinned', state.lang)}</span>{' '}
+        <span className="opacity-70">
+          ({safeIdx + 1}/{pins.length})
+        </span>{' '}
+        — <span className="opacity-80">{(m.text || '').slice(0, 80)}</span>
+      </button>
+      <button
+        type="button"
+        onClick={() => onUnpin(m.id)}
+        className="rounded-full border-2 border-ink/30 px-2 py-0.5 text-[10px] font-bold"
+        aria-label="Unpin"
+      >
+        {t('msg.unpin', state.lang)}
+      </button>
+    </div>
   )
 }

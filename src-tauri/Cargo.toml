@@ -1,6 +1,6 @@
 [package]
 name = "docot"
-version = "0.1.0"
+version = "0.1.2"
 description = "docot — black-and-white all-in-one messenger"
 authors = ["folder887"]
 license = "MIT"

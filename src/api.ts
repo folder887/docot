@@ -51,6 +51,9 @@ export type ApiUser = {
   kind: 'user' | 'bot' | 'channel' | 'group'
   phone: string
   avatarUrl: string | null
+  avatarSvg: string | null
+  status: string | null
+  presence: 'everyone' | 'contacts' | 'nobody'
   links: string[]
   lastSeen: number | null
   isContact: boolean
@@ -95,6 +98,8 @@ export type ApiMessage = {
   /** Sealed-sender messages have an empty `authorId`; clients fall back to the
    * other DM participant and verify identity via the inner Signal envelope. */
   sealed?: boolean
+  pinned?: boolean
+  pinnedAt?: number | null
   reactions?: ApiReactionAgg[]
 }
 
@@ -252,6 +257,9 @@ export const api = {
     bio?: string
     phone?: string
     avatarUrl?: string | null
+    avatarSvg?: string | null
+    status?: string | null
+    presence?: 'everyone' | 'contacts' | 'nobody'
     links?: string[]
   }) =>
     request<ApiUser>('/users/me', { method: 'PATCH', body: JSON.stringify(patch) }),
@@ -337,6 +345,31 @@ export const api = {
       `/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(messageId)}/reactions`,
       { method: 'POST', body: JSON.stringify({ emoji }) },
     ),
+  pinMessage: (chatId: string, messageId: string) =>
+    request<ApiMessage>(
+      `/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(messageId)}/pin`,
+      { method: 'POST' },
+    ),
+  unpinMessage: (chatId: string, messageId: string) =>
+    request<ApiMessage>(
+      `/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(messageId)}/pin`,
+      { method: 'DELETE' },
+    ),
+  listPins: (chatId: string) =>
+    request<ApiMessage[]>(`/chats/${encodeURIComponent(chatId)}/pins`),
+  savedChat: () => request<ApiChat>('/chats/saved'),
+  searchMessages: (q: string, chatId?: string) =>
+    request<Array<{ chatId: string; chatTitle: string; message: ApiMessage }>>(
+      `/chats/search?q=${encodeURIComponent(q)}${
+        chatId ? `&chat_id=${encodeURIComponent(chatId)}` : ''
+      }`,
+    ),
+  listBlocked: () => request<ApiUser[]>('/users/me/blocked'),
+  deleteAccount: (handle: string) =>
+    request<{ ok: boolean }>('/users/me', {
+      method: 'DELETE',
+      body: JSON.stringify({ handle }),
+    }),
   createPoll: (
     chatId: string,
     body: { question: string; options: string[]; multiple?: boolean; anonymous?: boolean },

@@ -71,6 +71,8 @@ type Ctx = {
   editMessage: (chatId: string, messageId: string, text: string) => Promise<void>
   deleteMessage: (chatId: string, messageId: string) => Promise<void>
   toggleReaction: (chatId: string, messageId: string, emoji: string) => Promise<void>
+  pinMessage: (chatId: string, messageId: string, pin: boolean) => Promise<void>
+  openSavedChat: () => Promise<string>
   applyReactionEvent: (
     chatId: string,
     messageId: string,
@@ -80,6 +82,7 @@ type Ctx = {
   ) => void
   applyMessageEdit: (chatId: string, msg: Message) => Promise<void>
   applyMessageDelete: (chatId: string, messageId: string, deletedAt: number) => void
+  applyMessagePin: (chatId: string, messageId: string, pinned: boolean, pinnedAt: number | null) => void
   createChat: (participantIds: string[], kind?: Chat['kind'], title?: string) => Promise<string>
   patchChat: (chatId: string, patch: { title?: string; description?: string; isPublic?: boolean }) => Promise<void>
   pinChat: (chatId: string, pinned: boolean) => Promise<void>
@@ -110,6 +113,9 @@ type Ctx = {
     bio?: string
     phone?: string
     avatarUrl?: string | null
+    avatarSvg?: string | null
+    status?: string | null
+    presence?: 'everyone' | 'contacts' | 'nobody'
     links?: string[]
   }) => Promise<void>
   loadUser: (id: string) => Promise<User | null>
@@ -142,6 +148,9 @@ function userFromApi(u: ApiUser): User {
     id: u.id,
     name: u.name,
     avatarUrl: u.avatarUrl ?? null,
+    avatarSvg: u.avatarSvg ?? null,
+    status: u.status ?? null,
+    presence: u.presence,
     links: Array.isArray(u.links) ? u.links : [],
     handle: u.handle,
     bio: u.bio,
@@ -163,6 +172,8 @@ function msgFromApi(m: ApiMessage): Message {
     deletedAt: m.deletedAt ?? null,
     replyToId: m.replyToId ?? null,
     sealed: m.sealed ?? false,
+    pinned: m.pinned ?? false,
+    pinnedAt: m.pinnedAt ?? null,
     reactions: m.reactions ?? [],
   }
 }
@@ -693,6 +704,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [],
   )
 
+  const applyMessagePin = useCallback(
+    (chatId: string, messageId: string, pinned: boolean, pinnedAt: number | null) => {
+      setState((s) => ({
+        ...s,
+        chats: s.chats.map((c) =>
+          c.id === chatId
+            ? {
+                ...c,
+                messages: c.messages.map((m) =>
+                  m.id === messageId ? { ...m, pinned, pinnedAt } : m,
+                ),
+              }
+            : c,
+        ),
+      }))
+    },
+    [],
+  )
+
   const editMessage = useCallback(
     async (chatId: string, messageId: string, text: string) => {
       const trimmed = text.trim()
@@ -803,6 +833,41 @@ export function AppProvider({ children }: { children: ReactNode }) {
     },
     [state.me?.id, applyReactionEvent],
   )
+
+  const pinMessage = useCallback(
+    async (chatId: string, messageId: string, pin: boolean) => {
+      const apiCall = pin ? api.pinMessage : api.unpinMessage
+      const updated = msgFromApi(await apiCall(chatId, messageId))
+      setState((s) => ({
+        ...s,
+        chats: s.chats.map((c) =>
+          c.id === chatId
+            ? {
+                ...c,
+                messages: c.messages.map((m) =>
+                  m.id === messageId
+                    ? { ...m, pinned: updated.pinned, pinnedAt: updated.pinnedAt }
+                    : m,
+                ),
+              }
+            : c,
+        ),
+      }))
+    },
+    [],
+  )
+
+  const openSavedChat = useCallback(async () => {
+    const chat = chatFromApi(await api.savedChat(), state.me?.id)
+    setState((s) => {
+      const exists = s.chats.find((c) => c.id === chat.id)
+      const chats = exists
+        ? s.chats.map((c) => (c.id === chat.id ? chat : c))
+        : [chat, ...s.chats]
+      return { ...s, chats: chats.sort(sortChats) }
+    })
+    return chat.id
+  }, [state.me?.id])
 
   const patchChat = useCallback(
     async (
@@ -1094,6 +1159,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       bio?: string
       phone?: string
       avatarUrl?: string | null
+      avatarSvg?: string | null
+      status?: string | null
+      presence?: 'everyone' | 'contacts' | 'nobody'
       links?: string[]
     }) => {
       const u = userFromApi(await api.updateMe(patch))
@@ -1162,9 +1230,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       editMessage,
       deleteMessage,
       toggleReaction,
+      pinMessage,
+      openSavedChat,
       applyReactionEvent,
       applyMessageEdit,
       applyMessageDelete,
+      applyMessagePin,
       createChat,
       patchChat,
       pinChat,
@@ -1208,9 +1279,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       editMessage,
       deleteMessage,
       toggleReaction,
+      pinMessage,
+      openSavedChat,
       applyReactionEvent,
       applyMessageEdit,
       applyMessageDelete,
+      applyMessagePin,
       createChat,
       patchChat,
       pinChat,

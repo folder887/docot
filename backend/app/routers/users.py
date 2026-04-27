@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -12,11 +13,27 @@ from ..schemas import UserOut, UserUpdateIn
 router = APIRouter(prefix="/users", tags=["users"])
 
 
-def _out(u: User, me_contacts: dict[str, Contact] | None = None) -> UserOut:
+def _out(
+    u: User,
+    me_contacts: dict[str, Contact] | None = None,
+    *,
+    is_self: bool = False,
+) -> UserOut:
     info = me_contacts.get(u.id) if me_contacts else None
     raw_links = (getattr(u, "links", "") or "").split("\n")
     links = [ln.strip() for ln in raw_links if ln and ln.strip()]
     avatar_url = getattr(u, "avatar_url", "") or None
+    avatar_svg = getattr(u, "avatar_svg", "") or None
+    status = getattr(u, "status", "") or None
+    presence = getattr(u, "presence", "everyone") or "everyone"
+    # Honour presence privacy. The user themselves and their contacts always
+    # see lastSeen; everyone else may be filtered depending on the setting.
+    last_seen: int | None = u.last_seen_at
+    if not is_self:
+        if presence == "nobody":
+            last_seen = None
+        elif presence == "contacts" and not info:
+            last_seen = None
     return UserOut(
         id=u.id,
         handle=u.handle,
@@ -25,8 +42,11 @@ def _out(u: User, me_contacts: dict[str, Contact] | None = None) -> UserOut:
         kind=u.kind,
         phone=u.phone,
         avatarUrl=avatar_url,
+        avatarSvg=avatar_svg,
+        status=status,
+        presence=presence,
         links=links,
-        lastSeen=u.last_seen_at,
+        lastSeen=last_seen,
         isContact=bool(info),
         blocked=bool(info and info.blocked),
     )
@@ -83,7 +103,7 @@ def get_user(
         .filter(Contact.owner_id == me.id, Contact.contact_id == u.id)
         .first()
     )
-    return _out(u, {u.id: c} if c else None)
+    return _out(u, {u.id: c} if c else None, is_self=u.id == me.id)
 
 
 @router.patch("/me", response_model=UserOut)
@@ -100,6 +120,12 @@ def update_me(
         me.phone = body.phone
     if body.avatarUrl is not None:
         me.avatar_url = body.avatarUrl.strip()
+    if body.avatarSvg is not None:
+        me.avatar_svg = body.avatarSvg.strip()
+    if body.status is not None:
+        me.status = body.status.strip()[:140]
+    if body.presence is not None:
+        me.presence = body.presence
     if body.links is not None:
         cleaned = [ln.strip() for ln in body.links if ln and ln.strip()]
         # Validate each link is an absolute http(s) URL — keeps the API from
@@ -113,7 +139,7 @@ def update_me(
     db.add(me)
     db.commit()
     db.refresh(me)
-    return _out(me)
+    return _out(me, is_self=True)
 
 
 @router.post("/{user_id}/contact", response_model=UserOut)
@@ -203,6 +229,55 @@ def unblock(
     return _out(target, {target.id: c} if c else None)
 
 
+@router.get("/me/blocked", response_model=list[UserOut])
+def list_blocked(
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> list[UserOut]:
+    rows = (
+        db.query(Contact, User)
+        .join(User, User.id == Contact.contact_id)
+        .filter(Contact.owner_id == me.id, Contact.blocked.is_(True))
+        .all()
+    )
+    return [_out(u, {u.id: c}) for c, u in rows]
+
+
+class _DeleteAccountIn(BaseModel):
+    handle: str
+
+
+@router.delete("/me")
+def delete_account(
+    body: _DeleteAccountIn,
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Permanent account deletion.
+
+    Requires the caller to retype their @handle as a confirmation token. We
+    null out the user's PII in place rather than deleting the row so that
+    foreign-key references (messages, posts, chat membership) remain valid;
+    chats containing only the deleted user are left dangling but become
+    orphaned (no other member can re-join).
+    """
+    expected = me.handle.lstrip("@").lower()
+    given = body.handle.strip().lstrip("@").lower()
+    if not given or given != expected:
+        raise HTTPException(status_code=400, detail="Handle does not match")
+    me.handle = f"deleted_{me.id[:8]}"
+    me.name = "Deleted user"
+    me.password_hash = ""
+    me.bio = ""
+    me.phone = ""
+    me.avatar_url = ""
+    me.avatar_svg = ""
+    me.status = ""
+    me.links = ""
+    db.commit()
+    return {"ok": True}
+
+
 @router.get("", response_model=list[UserOut])
 def list_contacts(
     me: User = Depends(current_user),
@@ -220,7 +295,7 @@ def list_contacts(
 # --- Bot creation -----------------------------------------------------------
 import re as _re
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from ..auth import hash_password
 

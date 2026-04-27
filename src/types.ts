@@ -27,7 +27,14 @@ export type User = {
   isContact?: boolean
   phone?: string
   avatarUrl?: string | null
+  /** Compact JSON config (see `AvatarSVG.tsx`) describing a paper-doll
+   * avatar drawn client-side. Takes precedence over `avatarUrl` when set. */
+  avatarSvg?: string | null
   links?: string[]
+  /** Free-form short status (e.g. "👋 hi"). Public. */
+  status?: string | null
+  /** Presence privacy — controls whether this user's `lastSeen` is exposed. */
+  presence?: 'everyone' | 'contacts' | 'nobody'
 }
 
 export type ReactionAgg = {
@@ -48,6 +55,8 @@ export type Message = {
    * `authorId`; the client substitutes the inferred sender (the other
    * participant in the DM). */
   sealed?: boolean
+  pinned?: boolean
+  pinnedAt?: number | null
   reactions?: ReactionAgg[]
 }
 
