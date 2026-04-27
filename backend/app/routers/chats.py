@@ -202,7 +202,7 @@ def search_messages(
         if chat_id not in member_chat_ids:
             raise HTTPException(status_code=403, detail="Not a member")
         member_chat_ids = [chat_id]
-    pat = f"%{qn.replace('%', '\\%').replace('_', '\\_')}%"
+    pat = f"%{qn.replace(chr(92), chr(92) * 2).replace('%', chr(92) + '%').replace('_', chr(92) + '_')}%"
     rows = (
         db.query(Message)
         .filter(

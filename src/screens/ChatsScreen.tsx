@@ -168,7 +168,7 @@ export function ChatsScreen() {
                   onClick: async () => {
                     try {
                       const id = await openSavedChat()
-                      navigate(`/chat/${id}`)
+                      navigate(`/chats/${id}`)
                     } catch {
                       /* ignore */
                     }
