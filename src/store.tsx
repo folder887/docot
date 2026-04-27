@@ -979,6 +979,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
           final = { ...incoming, text: plain }
         }
       }
+      // Track whether the message is genuinely new (not a re-render of
+       // history) so we can suppress notifications for the bulk-load path
+       // taken by ChatDetailScreen when opening a chat.
+      const alreadyInBuffer =
+        chatsRef.current
+          .find((c) => c.id === chatId)
+          ?.messages.some((m) => m.id === final.id) ?? false
       setState((s) => ({
         ...s,
         chats: s.chats
@@ -997,13 +1004,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
           .sort(sortChats),
       }))
 
-      // Notify the user — sound + (best-effort) desktop notification — when
-      // an incoming message arrives from someone else, the chat isn't
-      // muted, and global mute is off. We avoid both for our own sends and
-      // for messages already in the buffer (re-renders).
+      // Notify only on truly new arrivals from someone else when the chat
+      // isn't muted and global mute is off. Historical hydration replays
+      // through this same path — gating on `alreadyInBuffer` avoids
+      // beeping on every chat open.
       const fromMe = state.me?.id === final.authorId
       const muted = !!chat?.muted
-      if (!fromMe && !muted && !state.prefs.muteAll) {
+      if (!alreadyInBuffer && !fromMe && !muted && !state.prefs.muteAll) {
         if (state.prefs.sounds) ding()
         if (state.prefs.notifications && state.me) {
           const author = state.users[final.authorId]?.name ?? 'New message'
