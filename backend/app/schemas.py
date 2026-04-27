@@ -48,6 +48,8 @@ class UserOut(BaseModel):
     avatarSvg: str | None = None
     status: str | None = None
     presence: str = "everyone"
+    phoneVisibility: str = "contacts"
+    searchVisibility: str = "everyone"
     links: list[str] = []
     lastSeen: int | None = None
     isContact: bool = False
@@ -65,6 +67,8 @@ class UserUpdateIn(BaseModel):
     avatarSvg: str | None = Field(default=None, max_length=4000)
     status: str | None = Field(default=None, max_length=140)
     presence: str | None = Field(default=None, pattern="^(everyone|contacts|nobody)$")
+    phoneVisibility: str | None = Field(default=None, pattern="^(everyone|contacts|nobody)$")
+    searchVisibility: str | None = Field(default=None, pattern="^(everyone|contacts|nobody)$")
     links: list[str] | None = Field(default=None, max_length=10)
 
 

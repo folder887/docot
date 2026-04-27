@@ -124,17 +124,91 @@ function NotificationsSection() {
 }
 
 /* ------------ PRIVACY ------------ */
-function PrivacySection() {
-  const { state, setPrefs } = useApp()
+type Visibility = 'everyone' | 'contacts' | 'nobody'
+function VisibilityRow({
+  label,
+  value,
+  onChange,
+  hint,
+}: {
+  label: string
+  value: Visibility
+  onChange: (v: Visibility) => void
+  hint?: string
+}) {
+  const { state } = useApp()
   const lang = state.lang
+  return (
+    <div className="border-b border-line px-4 py-3">
+      <div className="font-bold">{label}</div>
+      {hint && <div className="mb-2 text-xs text-muted">{hint}</div>}
+      <div className="mt-1 flex gap-2">
+        {(['everyone', 'contacts', 'nobody'] as const).map((p) => (
+          <button
+            key={p}
+            type="button"
+            onClick={() => onChange(p)}
+            className={`flex-1 rounded-full border-2 border-ink px-2 py-1.5 text-xs font-bold ${
+              value === p ? 'bg-ink text-paper' : 'bg-paper text-ink'
+            }`}
+          >
+            {t(`profile.presence.${p}`, lang)}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function PrivacySection() {
+  const { state, setPrefs, updateMe } = useApp()
+  const lang = state.lang
+  const me = state.me
+  const [presence, setPresence] = useState<Visibility>((me?.presence as Visibility) ?? 'everyone')
+  const [phoneVis, setPhoneVis] = useState<Visibility>(
+    (me?.phoneVisibility as Visibility) ?? 'contacts',
+  )
+  const [searchVis, setSearchVis] = useState<Visibility>(
+    (me?.searchVisibility as Visibility) ?? 'everyone',
+  )
+
+  const persist = (patch: { presence?: Visibility; phoneVisibility?: Visibility; searchVisibility?: Visibility }) => {
+    void updateMe(patch).catch(() => {
+      /* server save best-effort; UI keeps user's choice */
+    })
+  }
   return (
     <div>
       <SectionHeader text={t('settings.privacy', lang)} />
-      <Toggle
-        label={t('settings.lastSeen', lang)}
-        hint={lang === 'ru' ? 'Показывать другим время вашего последнего захода' : 'Show last-seen time to others'}
-        value={state.prefs.lastSeen}
-        onChange={(v) => setPrefs({ lastSeen: v })}
+      <VisibilityRow
+        label={t('profile.presence', lang)}
+        value={presence}
+        hint={lang === 'ru' ? 'Кто видит «был в сети»' : 'Who can see your last-seen time'}
+        onChange={(v) => {
+          setPresence(v)
+          persist({ presence: v })
+        }}
+      />
+      <VisibilityRow
+        label={lang === 'ru' ? 'Кто видит мой номер' : 'Who can see my phone'}
+        value={phoneVis}
+        onChange={(v) => {
+          setPhoneVis(v)
+          persist({ phoneVisibility: v })
+        }}
+      />
+      <VisibilityRow
+        label={lang === 'ru' ? 'Кто может найти меня' : 'Who can find me by handle'}
+        value={searchVis}
+        hint={
+          lang === 'ru'
+            ? '"Никто" — только люди с приглашением могут начать чат'
+            : '"Nobody" makes the account effectively invitation-only'
+        }
+        onChange={(v) => {
+          setSearchVis(v)
+          persist({ searchVisibility: v })
+        }}
       />
       <Toggle
         label={t('settings.readReceipts', lang)}
@@ -739,9 +813,6 @@ function EditProfileSection() {
   const [avatarUrl, setAvatarUrl] = useState<string | null>(me?.avatarUrl ?? null)
   const [avatarSvg, setAvatarSvg] = useState<string | null>(me?.avatarSvg ?? null)
   const [status, setStatus] = useState(me?.status ?? '')
-  const [presence, setPresence] = useState<'everyone' | 'contacts' | 'nobody'>(
-    me?.presence ?? 'everyone',
-  )
   const [busy, setBusy] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
@@ -788,7 +859,6 @@ function EditProfileSection() {
         avatarUrl,
         avatarSvg,
         status,
-        presence,
         links: cleanedLinks,
       })
       setMsg(t('settings.saved', lang))
@@ -928,24 +998,6 @@ function EditProfileSection() {
         rows={3}
         className="w-full resize-none rounded-xl border-2 border-ink bg-paper px-3 py-2 text-base focus:outline-none"
       />
-
-      <label className="mb-2 mt-4 block text-xs font-bold uppercase tracking-wider text-ink/60">
-        {t('profile.presence', lang)}
-      </label>
-      <div className="flex gap-2">
-        {(['everyone', 'contacts', 'nobody'] as const).map((p) => (
-          <button
-            key={p}
-            type="button"
-            onClick={() => setPresence(p)}
-            className={`flex-1 rounded-full border-2 border-ink px-3 py-2 text-sm font-bold ${
-              presence === p ? 'bg-ink text-paper' : ''
-            }`}
-          >
-            {t(`profile.presence.${p}`, lang)}
-          </button>
-        ))}
-      </div>
 
       <label className="mb-2 mt-4 block text-xs font-bold uppercase tracking-wider text-ink/60">
         {t('profile.phone', lang)}

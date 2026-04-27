@@ -35,6 +35,10 @@ export type User = {
   status?: string | null
   /** Presence privacy — controls whether this user's `lastSeen` is exposed. */
   presence?: 'everyone' | 'contacts' | 'nobody'
+  /** Phone-number visibility (independent of presence). */
+  phoneVisibility?: 'everyone' | 'contacts' | 'nobody'
+  /** Discoverability via /users/search. */
+  searchVisibility?: 'everyone' | 'contacts' | 'nobody'
 }
 
 export type ReactionAgg = {

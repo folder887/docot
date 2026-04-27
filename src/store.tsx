@@ -116,6 +116,8 @@ type Ctx = {
     avatarSvg?: string | null
     status?: string | null
     presence?: 'everyone' | 'contacts' | 'nobody'
+    phoneVisibility?: 'everyone' | 'contacts' | 'nobody'
+    searchVisibility?: 'everyone' | 'contacts' | 'nobody'
     links?: string[]
   }) => Promise<void>
   loadUser: (id: string) => Promise<User | null>
@@ -151,6 +153,8 @@ function userFromApi(u: ApiUser): User {
     avatarSvg: u.avatarSvg ?? null,
     status: u.status ?? null,
     presence: u.presence,
+    phoneVisibility: u.phoneVisibility,
+    searchVisibility: u.searchVisibility,
     links: Array.isArray(u.links) ? u.links : [],
     handle: u.handle,
     bio: u.bio,
@@ -1157,6 +1161,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     async (patch: {
       name?: string
       bio?: string
+      phoneVisibility?: 'everyone' | 'contacts' | 'nobody'
+      searchVisibility?: 'everyone' | 'contacts' | 'nobody'
       phone?: string
       avatarUrl?: string | null
       avatarSvg?: string | null

@@ -21,6 +21,8 @@ def _user_to_out(u: User) -> UserOut:
     avatar_svg = getattr(u, "avatar_svg", "") or None
     status = getattr(u, "status", "") or None
     presence = getattr(u, "presence", "everyone") or "everyone"
+    phone_visibility = getattr(u, "phone_visibility", "contacts") or "contacts"
+    search_visibility = getattr(u, "search_visibility", "everyone") or "everyone"
     return UserOut(
         id=u.id,
         handle=u.handle,
@@ -32,6 +34,8 @@ def _user_to_out(u: User) -> UserOut:
         avatarSvg=avatar_svg,
         status=status,
         presence=presence,
+        phoneVisibility=phone_visibility,
+        searchVisibility=search_visibility,
         links=links,
         lastSeen=u.last_seen_at,
     )

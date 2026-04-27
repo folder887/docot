@@ -54,6 +54,8 @@ export type ApiUser = {
   avatarSvg: string | null
   status: string | null
   presence: 'everyone' | 'contacts' | 'nobody'
+  phoneVisibility: 'everyone' | 'contacts' | 'nobody'
+  searchVisibility: 'everyone' | 'contacts' | 'nobody'
   links: string[]
   lastSeen: number | null
   isContact: boolean
@@ -260,6 +262,8 @@ export const api = {
     avatarSvg?: string | null
     status?: string | null
     presence?: 'everyone' | 'contacts' | 'nobody'
+    phoneVisibility?: 'everyone' | 'contacts' | 'nobody'
+    searchVisibility?: 'everyone' | 'contacts' | 'nobody'
     links?: string[]
   }) =>
     request<ApiUser>('/users/me', { method: 'PATCH', body: JSON.stringify(patch) }),

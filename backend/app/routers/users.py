@@ -62,6 +62,18 @@ def _out(
     avatar_svg = getattr(u, "avatar_svg", "") or None
     status = getattr(u, "status", "") or None
     presence = getattr(u, "presence", "everyone") or "everyone"
+    phone_visibility = getattr(u, "phone_visibility", "contacts") or "contacts"
+    search_visibility = getattr(u, "search_visibility", "everyone") or "everyone"
+
+    def _gated(value: str, mode: str) -> str:
+        if is_self:
+            return value
+        if mode == "nobody":
+            return ""
+        if mode == "contacts" and not viewer_in_target_contacts:
+            return ""
+        return value
+
     # Honour presence privacy. `contacts` means "only people I've added see
     # my lastSeen" — i.e. the *target* must have the viewer in their contacts,
     # not the other way around (that's `info`, viewer's view of target).
@@ -71,17 +83,20 @@ def _out(
             last_seen = None
         elif presence == "contacts" and not viewer_in_target_contacts:
             last_seen = None
+    phone = _gated(u.phone or "", phone_visibility)
     return UserOut(
         id=u.id,
         handle=u.handle,
         name=u.name,
         bio=u.bio,
         kind=u.kind,
-        phone=u.phone,
+        phone=phone,
         avatarUrl=avatar_url,
         avatarSvg=avatar_svg,
         status=status,
         presence=presence,
+        phoneVisibility=phone_visibility,
+        searchVisibility=search_visibility,
         links=links,
         lastSeen=last_seen,
         isContact=bool(info),
@@ -117,6 +132,17 @@ def search(
         .limit(20)
         .all()
     )
+    # Discoverability gating. Users with search_visibility=='nobody' are not
+    # returned at all unless they are an existing contact of the viewer.
+    # 'contacts' returns hits only for viewers who the target has added.
+    if rows:
+        viewer_in = _viewers_in_targets_contacts(db, me.id, [u.id for u in rows])
+        rows = [
+            u
+            for u in rows
+            if (getattr(u, "search_visibility", "everyone") or "everyone") == "everyone"
+            or u.id in viewer_in
+        ]
     contacts = {
         c.contact_id: c
         for c in db.query(Contact).filter(Contact.owner_id == me.id).all()
@@ -170,6 +196,10 @@ def update_me(
         me.status = body.status.strip()[:140]
     if body.presence is not None:
         me.presence = body.presence
+    if body.phoneVisibility is not None:
+        me.phone_visibility = body.phoneVisibility
+    if body.searchVisibility is not None:
+        me.search_visibility = body.searchVisibility
     if body.links is not None:
         cleaned = [ln.strip() for ln in body.links if ln and ln.strip()]
         # Validate each link is an absolute http(s) URL — keeps the API from

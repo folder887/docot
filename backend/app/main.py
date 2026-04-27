@@ -41,6 +41,8 @@ _MIGRATIONS: list[tuple[str, str, str]] = [
     ("users", "avatar_svg", "TEXT NOT NULL DEFAULT ''"),
     ("users", "status", "VARCHAR(140) NOT NULL DEFAULT ''"),
     ("users", "presence", "VARCHAR(16) NOT NULL DEFAULT 'everyone'"),
+    ("users", "phone_visibility", "VARCHAR(16) NOT NULL DEFAULT 'contacts'"),
+    ("users", "search_visibility", "VARCHAR(16) NOT NULL DEFAULT 'everyone'"),
     ("users", "links", "TEXT NOT NULL DEFAULT ''"),
     ("users", "bot_owner_id", "VARCHAR NOT NULL DEFAULT ''"),
     ("messages", "pinned", "INTEGER NOT NULL DEFAULT 0"),

@@ -42,6 +42,11 @@ class User(Base):
     # Values: "everyone" | "contacts" | "nobody". Default keeps prior
     # behaviour (everyone sees lastSeen).
     presence: Mapped[str] = mapped_column(String(16), default="everyone")
+    # Phone-number visibility (independent of presence). Same vocabulary.
+    phone_visibility: Mapped[str] = mapped_column(String(16), default="contacts")
+    # Discoverability via /users/search by handle/name. "nobody" makes the
+    # account effectively invitation-only (existing contacts/DMs still work).
+    search_visibility: Mapped[str] = mapped_column(String(16), default="everyone")
     # Links serialised as newline-separated URLs to avoid a 1:N table for
     # what is effectively a single short list per user.
     links: Mapped[str] = mapped_column(Text, default="")
