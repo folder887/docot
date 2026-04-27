@@ -132,17 +132,21 @@ def search(
         .limit(20)
         .all()
     )
-    # Discoverability gating. Users with search_visibility=='nobody' are not
-    # returned at all unless they are an existing contact of the viewer.
-    # 'contacts' returns hits only for viewers who the target has added.
+    # Discoverability gating. Three modes:
+    #   everyone  → always visible in search
+    #   contacts  → visible only if the target has the viewer as a contact
+    #   nobody    → never visible in search (effectively invitation-only)
     if rows:
         viewer_in = _viewers_in_targets_contacts(db, me.id, [u.id for u in rows])
-        rows = [
-            u
-            for u in rows
-            if (getattr(u, "search_visibility", "everyone") or "everyone") == "everyone"
-            or u.id in viewer_in
-        ]
+        kept: list[User] = []
+        for u in rows:
+            mode = getattr(u, "search_visibility", "everyone") or "everyone"
+            if mode == "everyone":
+                kept.append(u)
+            elif mode == "contacts" and u.id in viewer_in:
+                kept.append(u)
+            # mode == "nobody": always skipped
+        rows = kept
     contacts = {
         c.contact_id: c
         for c in db.query(Contact).filter(Contact.owner_id == me.id).all()

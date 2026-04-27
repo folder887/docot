@@ -74,7 +74,16 @@ def user_from_token(token: str, db: Session) -> User | None:
     uid = payload.get("sub")
     if not uid:
         return None
-    return db.get(User, uid)
+    user = db.get(User, uid)
+    if not user:
+        return None
+    # Soft-deleted accounts (password_hash cleared by delete_account) must be
+    # rejected here too — the WebSocket handler authenticates via this
+    # function and would otherwise let a deleted user keep receiving
+    # broadcasts on stale JWTs.
+    if not user.password_hash:
+        return None
+    return user
 
 
 def get_bearer_from_request(request: Request) -> str | None:
