@@ -30,6 +30,7 @@ import {
   maybeDecrypt,
 } from './crypto/session'
 import { idbClearAll } from './crypto/idb'
+import { ding, desktopNotify } from './components/notify'
 import {
   recallIncoming,
   recallOutgoing,
@@ -995,8 +996,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
           )
           .sort(sortChats),
       }))
+
+      // Notify the user — sound + (best-effort) desktop notification — when
+      // an incoming message arrives from someone else, the chat isn't
+      // muted, and global mute is off. We avoid both for our own sends and
+      // for messages already in the buffer (re-renders).
+      const fromMe = state.me?.id === final.authorId
+      const muted = !!chat?.muted
+      if (!fromMe && !muted && !state.prefs.muteAll) {
+        if (state.prefs.sounds) ding()
+        if (state.prefs.notifications && state.me) {
+          const author = state.users[final.authorId]?.name ?? 'New message'
+          const body = isEncryptedEnvelope(final.text) ? '🔒 Encrypted' : final.text
+          desktopNotify(author, body)
+        }
+      }
     },
-    [state.me],
+    [state.me, state.prefs.sounds, state.prefs.muteAll, state.prefs.notifications, state.users],
   )
 
   const createChat = useCallback(

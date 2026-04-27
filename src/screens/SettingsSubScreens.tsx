@@ -117,6 +117,25 @@ function NotificationsSection() {
   return (
     <div>
       <SectionHeader text={t('settings.notifications', lang)} />
+      <Toggle
+        label={t('settings.desktopNotifications', lang)}
+        hint={
+          lang === 'ru'
+            ? 'Системные уведомления, когда вкладка не на фокусе'
+            : 'OS notifications when the tab is not focused'
+        }
+        value={state.prefs.notifications}
+        onChange={async (v) => {
+          if (v) {
+            const { ensureNotificationPermission } = await import('../components/notify')
+            const r = await ensureNotificationPermission()
+            if (r === 'granted') setPrefs({ notifications: true })
+            else setPrefs({ notifications: false })
+          } else {
+            setPrefs({ notifications: false })
+          }
+        }}
+      />
       <Toggle label={t('settings.sounds', lang)} value={state.prefs.sounds} onChange={(v) => setPrefs({ sounds: v })} />
       <Toggle label={t('settings.muteAll', lang)} value={state.prefs.muteAll} onChange={(v) => setPrefs({ muteAll: v })} />
     </div>

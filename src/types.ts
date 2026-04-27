@@ -19,6 +19,8 @@ export type Prefs = {
   fontSize: FontSize
   /** When true, follow the OS dark/light preference and override `theme`. */
   autoNight: boolean
+  /** Show desktop / system notifications on incoming messages. */
+  notifications: boolean
 }
 
 export type User = {
@@ -181,4 +183,5 @@ export const defaultPrefs: Prefs = {
   compactMode: false,
   fontSize: 'md',
   autoNight: false,
+  notifications: false,
 }

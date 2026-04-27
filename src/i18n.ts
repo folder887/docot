@@ -70,6 +70,7 @@ const DICT: Dict = {
   'settings.save': { en: 'Save', ru: 'Сохранить' },
   'settings.myAccount': { en: 'My Account', ru: 'Мой аккаунт' },
   'settings.notifications': { en: 'Notifications and Sounds', ru: 'Уведомления и звуки' },
+  'settings.desktopNotifications': { en: 'Desktop notifications', ru: 'Уведомления системы' },
   'settings.privacy': { en: 'Privacy and Security', ru: 'Приватность и безопасность' },
   'settings.chatSettings': { en: 'Chat Settings', ru: 'Настройки чатов' },
   'settings.folders': { en: 'Folders', ru: 'Папки' },
