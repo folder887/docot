@@ -30,6 +30,7 @@ import {
   maybeDecrypt,
 } from './crypto/session'
 import { idbClearAll } from './crypto/idb'
+import { ding, desktopNotify } from './components/notify'
 import {
   recallIncoming,
   recallOutgoing,
@@ -71,6 +72,8 @@ type Ctx = {
   editMessage: (chatId: string, messageId: string, text: string) => Promise<void>
   deleteMessage: (chatId: string, messageId: string) => Promise<void>
   toggleReaction: (chatId: string, messageId: string, emoji: string) => Promise<void>
+  pinMessage: (chatId: string, messageId: string, pin: boolean) => Promise<void>
+  openSavedChat: () => Promise<string>
   applyReactionEvent: (
     chatId: string,
     messageId: string,
@@ -80,8 +83,20 @@ type Ctx = {
   ) => void
   applyMessageEdit: (chatId: string, msg: Message) => Promise<void>
   applyMessageDelete: (chatId: string, messageId: string, deletedAt: number) => void
+  applyMessagePin: (chatId: string, messageId: string, pinned: boolean, pinnedAt: number | null) => void
   createChat: (participantIds: string[], kind?: Chat['kind'], title?: string) => Promise<string>
-  patchChat: (chatId: string, patch: { title?: string; description?: string; isPublic?: boolean }) => Promise<void>
+  patchChat: (
+    chatId: string,
+    patch: {
+      title?: string
+      description?: string
+      isPublic?: boolean
+      slowModeSeconds?: number
+      subscribersOnly?: boolean
+      signedPosts?: boolean
+      autoDeleteSeconds?: number
+    },
+  ) => Promise<void>
   pinChat: (chatId: string, pinned: boolean) => Promise<void>
   muteChat: (chatId: string, muted: boolean) => Promise<void>
   deleteChat: (chatId: string) => Promise<void>
@@ -110,6 +125,11 @@ type Ctx = {
     bio?: string
     phone?: string
     avatarUrl?: string | null
+    avatarSvg?: string | null
+    status?: string | null
+    presence?: 'everyone' | 'contacts' | 'nobody'
+    phoneVisibility?: 'everyone' | 'contacts' | 'nobody'
+    searchVisibility?: 'everyone' | 'contacts' | 'nobody'
     links?: string[]
   }) => Promise<void>
   loadUser: (id: string) => Promise<User | null>
@@ -142,6 +162,11 @@ function userFromApi(u: ApiUser): User {
     id: u.id,
     name: u.name,
     avatarUrl: u.avatarUrl ?? null,
+    avatarSvg: u.avatarSvg ?? null,
+    status: u.status ?? null,
+    presence: u.presence,
+    phoneVisibility: u.phoneVisibility,
+    searchVisibility: u.searchVisibility,
     links: Array.isArray(u.links) ? u.links : [],
     handle: u.handle,
     bio: u.bio,
@@ -163,6 +188,8 @@ function msgFromApi(m: ApiMessage): Message {
     deletedAt: m.deletedAt ?? null,
     replyToId: m.replyToId ?? null,
     sealed: m.sealed ?? false,
+    pinned: m.pinned ?? false,
+    pinnedAt: m.pinnedAt ?? null,
     reactions: m.reactions ?? [],
   }
 }
@@ -301,6 +328,7 @@ function chatFromApi(c: ApiChat, meId?: string): Chat {
     slowModeSeconds: c.slowModeSeconds ?? 0,
     subscribersOnly: !!c.subscribersOnly,
     signedPosts: !!c.signedPosts,
+    autoDeleteSeconds: c.autoDeleteSeconds ?? 0,
     createdBy: c.createdBy,
     participants: c.participants,
     messages: c.messages.map((m) => fixSealed(msgFromApi(m))),
@@ -693,6 +721,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [],
   )
 
+  const applyMessagePin = useCallback(
+    (chatId: string, messageId: string, pinned: boolean, pinnedAt: number | null) => {
+      setState((s) => ({
+        ...s,
+        chats: s.chats.map((c) =>
+          c.id === chatId
+            ? {
+                ...c,
+                messages: c.messages.map((m) =>
+                  m.id === messageId ? { ...m, pinned, pinnedAt } : m,
+                ),
+              }
+            : c,
+        ),
+      }))
+    },
+    [],
+  )
+
   const editMessage = useCallback(
     async (chatId: string, messageId: string, text: string) => {
       const trimmed = text.trim()
@@ -804,10 +851,53 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [state.me?.id, applyReactionEvent],
   )
 
+  const pinMessage = useCallback(
+    async (chatId: string, messageId: string, pin: boolean) => {
+      const apiCall = pin ? api.pinMessage : api.unpinMessage
+      const updated = msgFromApi(await apiCall(chatId, messageId))
+      setState((s) => ({
+        ...s,
+        chats: s.chats.map((c) =>
+          c.id === chatId
+            ? {
+                ...c,
+                messages: c.messages.map((m) =>
+                  m.id === messageId
+                    ? { ...m, pinned: updated.pinned, pinnedAt: updated.pinnedAt }
+                    : m,
+                ),
+              }
+            : c,
+        ),
+      }))
+    },
+    [],
+  )
+
+  const openSavedChat = useCallback(async () => {
+    const chat = chatFromApi(await api.savedChat(), state.me?.id)
+    setState((s) => {
+      const exists = s.chats.find((c) => c.id === chat.id)
+      const chats = exists
+        ? s.chats.map((c) => (c.id === chat.id ? chat : c))
+        : [chat, ...s.chats]
+      return { ...s, chats: chats.sort(sortChats) }
+    })
+    return chat.id
+  }, [state.me?.id])
+
   const patchChat = useCallback(
     async (
       chatId: string,
-      patch: { title?: string; description?: string; isPublic?: boolean },
+      patch: {
+        title?: string
+        description?: string
+        isPublic?: boolean
+        slowModeSeconds?: number
+        subscribersOnly?: boolean
+        signedPosts?: boolean
+        autoDeleteSeconds?: number
+      },
     ) => {
       const updated = chatFromApi(await api.patchChat(chatId, patch), state.me?.id)
       setState((s) => ({
@@ -889,6 +979,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
           final = { ...incoming, text: plain }
         }
       }
+      // Track whether the message is genuinely new (not a re-render of
+       // history) so we can suppress notifications for the bulk-load path
+       // taken by ChatDetailScreen when opening a chat.
+      const alreadyInBuffer =
+        chatsRef.current
+          .find((c) => c.id === chatId)
+          ?.messages.some((m) => m.id === final.id) ?? false
       setState((s) => ({
         ...s,
         chats: s.chats
@@ -906,8 +1003,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
           )
           .sort(sortChats),
       }))
+
+      // Notify only on truly new arrivals from someone else when the chat
+      // isn't muted and global mute is off. Historical hydration replays
+      // through this same path — gating on `alreadyInBuffer` avoids
+      // beeping on every chat open.
+      const fromMe = state.me?.id === final.authorId
+      const muted = !!chat?.muted
+      if (!alreadyInBuffer && !fromMe && !muted && !state.prefs.muteAll) {
+        if (state.prefs.sounds) ding()
+        if (state.prefs.notifications && state.me) {
+          const author = state.users[final.authorId]?.name ?? 'New message'
+          const body = isEncryptedEnvelope(final.text) ? '🔒 Encrypted' : final.text
+          desktopNotify(author, body)
+        }
+      }
     },
-    [state.me],
+    [state.me, state.prefs.sounds, state.prefs.muteAll, state.prefs.notifications, state.users],
   )
 
   const createChat = useCallback(
@@ -1092,8 +1204,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     async (patch: {
       name?: string
       bio?: string
+      phoneVisibility?: 'everyone' | 'contacts' | 'nobody'
+      searchVisibility?: 'everyone' | 'contacts' | 'nobody'
       phone?: string
       avatarUrl?: string | null
+      avatarSvg?: string | null
+      status?: string | null
+      presence?: 'everyone' | 'contacts' | 'nobody'
       links?: string[]
     }) => {
       const u = userFromApi(await api.updateMe(patch))
@@ -1162,9 +1279,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       editMessage,
       deleteMessage,
       toggleReaction,
+      pinMessage,
+      openSavedChat,
       applyReactionEvent,
       applyMessageEdit,
       applyMessageDelete,
+      applyMessagePin,
       createChat,
       patchChat,
       pinChat,
@@ -1208,9 +1328,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       editMessage,
       deleteMessage,
       toggleReaction,
+      pinMessage,
+      openSavedChat,
       applyReactionEvent,
       applyMessageEdit,
       applyMessageDelete,
+      applyMessagePin,
       createChat,
       patchChat,
       pinChat,

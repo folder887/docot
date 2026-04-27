@@ -106,7 +106,48 @@ export function ChatComposer({
   chatId,
 }: Props) {
   const { state } = useApp()
-  const [text, setText] = useState('')
+  const draftKey = chatId ? `docot:draft:${chatId}` : null
+  const [text, setText] = useState<string>(() => {
+    if (!draftKey) return ''
+    try {
+      return localStorage.getItem(draftKey) ?? ''
+    } catch {
+      return ''
+    }
+  })
+
+  // Persist outgoing text per chat. Skip the first run after `draftKey` flips
+  // — the current `text` still belongs to the previous chat at that point and
+  // would otherwise overwrite the destination chat's draft.
+  const prevDraftKeyRef = useRef(draftKey)
+  useEffect(() => {
+    if (!draftKey) {
+      prevDraftKeyRef.current = draftKey
+      return
+    }
+    if (prevDraftKeyRef.current !== draftKey) {
+      prevDraftKeyRef.current = draftKey
+      return
+    }
+    try {
+      if (text) localStorage.setItem(draftKey, text)
+      else localStorage.removeItem(draftKey)
+    } catch {
+      /* quota exceeded — drop silently */
+    }
+  }, [draftKey, text])
+
+  // Switching to another chat — load that chat's draft.
+  useEffect(() => {
+    if (!draftKey) return
+    try {
+      const saved = localStorage.getItem(draftKey)
+      setText(saved ?? '')
+    } catch {
+      /* ignore */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftKey])
 
   useEffect(() => {
     if (!editing) return

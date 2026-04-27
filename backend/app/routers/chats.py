@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel
 from sqlalchemy import and_
 from sqlalchemy.orm import Session
 
@@ -52,6 +53,8 @@ def _msg_out(
         deletedAt=m.deleted_at,
         replyToId=m.reply_to_id,
         sealed=sealed,
+        pinned=bool(getattr(m, "pinned", False)),
+        pinnedAt=getattr(m, "pinned_at", None),
         reactions=reactions or [],
     )
 
@@ -119,6 +122,7 @@ def _chat_out(db: Session, chat: Chat, me_id: str, with_history: bool = False) -
         slowModeSeconds=int(getattr(chat, "slow_mode_seconds", 0) or 0),
         subscribersOnly=bool(getattr(chat, "subscribers_only", False)),
         signedPosts=bool(getattr(chat, "signed_posts", False)),
+        autoDeleteSeconds=int(getattr(chat, "auto_delete_seconds", 0) or 0),
         createdBy=chat.created_by,
         participants=members,
         pinned=bool(membership and membership.pinned),
@@ -140,6 +144,92 @@ def list_chats(me: User = Depends(current_user), db: Session = Depends(get_db)) 
         .all()
     )
     return [_chat_out(db, c, me.id) for c in chats]
+
+
+@router.get("/saved", response_model=ChatOut)
+def saved_chat(
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> ChatOut:
+    """Return (and lazily create) the user's personal Saved Messages chat.
+
+    Saved Messages is a single-member chat (kind="saved") used as a personal
+    notepad. Unlike DMs it has only the owner as a member, and pin/edit/delete
+    are unrestricted within it.
+    """
+    chat = (
+        db.query(Chat)
+        .join(ChatMember, ChatMember.chat_id == Chat.id)
+        .filter(Chat.kind == "saved", ChatMember.user_id == me.id)
+        .first()
+    )
+    if not chat:
+        chat = Chat(kind="saved", title="Saved Messages", created_by=me.id)
+        db.add(chat)
+        db.flush()
+        db.add(ChatMember(chat_id=chat.id, user_id=me.id, role="owner"))
+        db.commit()
+        db.refresh(chat)
+    return _chat_out(db, chat, me.id, with_history=True)
+
+
+class _SearchHit(BaseModel):
+    chatId: str
+    chatTitle: str
+    message: MessageOut
+
+
+@router.get("/search", response_model=list[_SearchHit])
+def search_messages(
+    q: str = "",
+    chat_id: str | None = None,
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> list[_SearchHit]:
+    """Global / per-chat plaintext search across the user's messages.
+
+    Sealed (E2E-encrypted) DMs are excluded server-side: their `text` is the
+    Signal envelope, never plaintext.
+    """
+    qn = q.strip()
+    if len(qn) < 2:
+        return []
+    member_chat_ids = [
+        cid for (cid,) in db.query(ChatMember.chat_id).filter(ChatMember.user_id == me.id).all()
+    ]
+    if not member_chat_ids:
+        return []
+    if chat_id:
+        if chat_id not in member_chat_ids:
+            raise HTTPException(status_code=403, detail="Not a member")
+        member_chat_ids = [chat_id]
+    pat = f"%{qn.replace(chr(92), chr(92) * 2).replace('%', chr(92) + '%').replace('_', chr(92) + '_')}%"
+    rows = (
+        db.query(Message)
+        .filter(
+            Message.chat_id.in_(member_chat_ids),
+            Message.deleted_at.is_(None),
+            Message.sealed.is_(False),
+            Message.text.ilike(pat, escape="\\"),
+        )
+        .order_by(Message.created_at.desc())
+        .limit(80)
+        .all()
+    )
+    rmap = _reactions_by_message(db, [m.id for m in rows], me.id)
+    chat_titles: dict[str, str] = {}
+    for c in db.query(Chat).filter(Chat.id.in_({m.chat_id for m in rows})).all():
+        chat_titles[c.id] = c.title or ("Saved Messages" if c.kind == "saved" else "Chat")
+    out: list[_SearchHit] = []
+    for m in rows:
+        out.append(
+            _SearchHit(
+                chatId=m.chat_id,
+                chatTitle=chat_titles.get(m.chat_id, "Chat"),
+                message=_msg_out(m, viewer_id=me.id, reactions=rmap.get(m.id)),
+            )
+        )
+    return out
 
 
 @router.post("", response_model=ChatOut)
@@ -367,6 +457,91 @@ async def delete_message(
     return {"ok": True, "id": message_id}
 
 
+@router.post("/{chat_id}/messages/{message_id}/pin", response_model=MessageOut)
+async def pin_message(
+    chat_id: str,
+    message_id: str,
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> MessageOut:
+    _require_member(db, chat_id, me.id)
+    msg = db.get(Message, message_id)
+    if not msg or msg.chat_id != chat_id:
+        raise HTTPException(status_code=404, detail="Message not found")
+    chat = db.get(Chat, chat_id)
+    mem = (
+        db.query(ChatMember)
+        .filter(ChatMember.chat_id == chat_id, ChatMember.user_id == me.id)
+        .first()
+    )
+    is_admin = bool(mem and mem.role in ("owner", "admin"))
+    # In DMs / saved both participants can pin; in groups/channels only admins.
+    if chat and chat.kind not in ("dm", "saved") and not is_admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+    if not msg.pinned:
+        msg.pinned = True
+        msg.pinned_at = now_ms()
+        db.commit()
+    await hub.broadcast(
+        chat_id,
+        {"type": "message_pinned", "chatId": chat_id, "messageId": message_id, "pinnedAt": msg.pinned_at},
+    )
+    return _msg_out(msg, viewer_id=me.id)
+
+
+@router.delete("/{chat_id}/messages/{message_id}/pin", response_model=MessageOut)
+async def unpin_message(
+    chat_id: str,
+    message_id: str,
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> MessageOut:
+    _require_member(db, chat_id, me.id)
+    msg = db.get(Message, message_id)
+    if not msg or msg.chat_id != chat_id:
+        raise HTTPException(status_code=404, detail="Message not found")
+    chat = db.get(Chat, chat_id)
+    mem = (
+        db.query(ChatMember)
+        .filter(ChatMember.chat_id == chat_id, ChatMember.user_id == me.id)
+        .first()
+    )
+    is_admin = bool(mem and mem.role in ("owner", "admin"))
+    if chat and chat.kind not in ("dm", "saved") and not is_admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+    if msg.pinned:
+        msg.pinned = False
+        msg.pinned_at = None
+        db.commit()
+    await hub.broadcast(
+        chat_id,
+        {"type": "message_unpinned", "chatId": chat_id, "messageId": message_id},
+    )
+    return _msg_out(msg, viewer_id=me.id)
+
+
+@router.get("/{chat_id}/pins", response_model=list[MessageOut])
+def list_pins(
+    chat_id: str,
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> list[MessageOut]:
+    _require_member(db, chat_id, me.id)
+    rows = (
+        db.query(Message)
+        .filter(
+            Message.chat_id == chat_id,
+            Message.pinned.is_(True),
+            Message.deleted_at.is_(None),
+        )
+        .order_by(Message.pinned_at.desc())
+        .limit(100)
+        .all()
+    )
+    rmap = _reactions_by_message(db, [m.id for m in rows], me.id)
+    return [_msg_out(m, viewer_id=me.id, reactions=rmap.get(m.id)) for m in rows]
+
+
 @router.post(
     "/{chat_id}/messages/{message_id}/reactions",
     response_model=list[ReactionAggOut],
@@ -454,6 +629,8 @@ def update_chat(
         chat.subscribers_only = bool(body.subscribersOnly)
     if body.signedPosts is not None:
         chat.signed_posts = bool(body.signedPosts)
+    if body.autoDeleteSeconds is not None:
+        chat.auto_delete_seconds = int(body.autoDeleteSeconds)
     chat.updated_at = now_ms()
     db.commit()
     db.refresh(chat)

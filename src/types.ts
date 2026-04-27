@@ -2,6 +2,8 @@ export type Lang = 'en' | 'ru'
 export type Theme = 'light' | 'dark' | 'paper' | 'inverse'
 export type Wallpaper = 'none' | 'dots' | 'grid' | 'noise' | 'ink' | 'lines' | 'waves'
 
+export type FontSize = 'sm' | 'md' | 'lg'
+
 export type Prefs = {
   theme: Theme
   wallpaper: Wallpaper
@@ -14,6 +16,11 @@ export type Prefs = {
   twoStep: boolean
   passcode: boolean
   compactMode: boolean
+  fontSize: FontSize
+  /** When true, follow the OS dark/light preference and override `theme`. */
+  autoNight: boolean
+  /** Show desktop / system notifications on incoming messages. */
+  notifications: boolean
 }
 
 export type User = {
@@ -27,7 +34,18 @@ export type User = {
   isContact?: boolean
   phone?: string
   avatarUrl?: string | null
+  /** Compact JSON config (see `AvatarSVG.tsx`) describing a paper-doll
+   * avatar drawn client-side. Takes precedence over `avatarUrl` when set. */
+  avatarSvg?: string | null
   links?: string[]
+  /** Free-form short status (e.g. "👋 hi"). Public. */
+  status?: string | null
+  /** Presence privacy — controls whether this user's `lastSeen` is exposed. */
+  presence?: 'everyone' | 'contacts' | 'nobody'
+  /** Phone-number visibility (independent of presence). */
+  phoneVisibility?: 'everyone' | 'contacts' | 'nobody'
+  /** Discoverability via /users/search. */
+  searchVisibility?: 'everyone' | 'contacts' | 'nobody'
 }
 
 export type ReactionAgg = {
@@ -48,6 +66,8 @@ export type Message = {
    * `authorId`; the client substitutes the inferred sender (the other
    * participant in the DM). */
   sealed?: boolean
+  pinned?: boolean
+  pinnedAt?: number | null
   reactions?: ReactionAgg[]
 }
 
@@ -62,6 +82,7 @@ export type Chat = {
   slowModeSeconds?: number
   subscribersOnly?: boolean
   signedPosts?: boolean
+  autoDeleteSeconds?: number
   createdBy?: string
   participants: string[]
   messages: Message[]
@@ -160,4 +181,7 @@ export const defaultPrefs: Prefs = {
   twoStep: false,
   passcode: false,
   compactMode: false,
+  fontSize: 'md',
+  autoNight: false,
+  notifications: false,
 }

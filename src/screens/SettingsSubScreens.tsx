@@ -1,11 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { useApp } from '../store'
 import { t } from '../i18n'
-import type { Theme, Wallpaper } from '../types'
+import type { Theme, Wallpaper, User } from '../types'
 import { ScreenHeader } from '../components/ScreenHeader'
 import { QRCode } from '../components/QRCode'
 import { Avatar } from '../components/Avatar'
+import { AvatarBuilder } from '../components/AvatarBuilder'
+import { encodeAvatarConfig, decodeAvatarConfig } from '../components/AvatarSVG'
+import { Modal } from '../components/Modal'
+import { api } from '../api'
 
 export function SettingsSubScreen() {
   const { section } = useParams<{ section: string }>()
@@ -113,6 +117,25 @@ function NotificationsSection() {
   return (
     <div>
       <SectionHeader text={t('settings.notifications', lang)} />
+      <Toggle
+        label={t('settings.desktopNotifications', lang)}
+        hint={
+          lang === 'ru'
+            ? 'Системные уведомления, когда вкладка не на фокусе'
+            : 'OS notifications when the tab is not focused'
+        }
+        value={state.prefs.notifications}
+        onChange={async (v) => {
+          if (v) {
+            const { ensureNotificationPermission } = await import('../components/notify')
+            const r = await ensureNotificationPermission()
+            if (r === 'granted') setPrefs({ notifications: true })
+            else setPrefs({ notifications: false })
+          } else {
+            setPrefs({ notifications: false })
+          }
+        }}
+      />
       <Toggle label={t('settings.sounds', lang)} value={state.prefs.sounds} onChange={(v) => setPrefs({ sounds: v })} />
       <Toggle label={t('settings.muteAll', lang)} value={state.prefs.muteAll} onChange={(v) => setPrefs({ muteAll: v })} />
     </div>
@@ -120,17 +143,91 @@ function NotificationsSection() {
 }
 
 /* ------------ PRIVACY ------------ */
-function PrivacySection() {
-  const { state, setPrefs } = useApp()
+type Visibility = 'everyone' | 'contacts' | 'nobody'
+function VisibilityRow({
+  label,
+  value,
+  onChange,
+  hint,
+}: {
+  label: string
+  value: Visibility
+  onChange: (v: Visibility) => void
+  hint?: string
+}) {
+  const { state } = useApp()
   const lang = state.lang
+  return (
+    <div className="border-b border-line px-4 py-3">
+      <div className="font-bold">{label}</div>
+      {hint && <div className="mb-2 text-xs text-muted">{hint}</div>}
+      <div className="mt-1 flex gap-2">
+        {(['everyone', 'contacts', 'nobody'] as const).map((p) => (
+          <button
+            key={p}
+            type="button"
+            onClick={() => onChange(p)}
+            className={`flex-1 rounded-full border-2 border-ink px-2 py-1.5 text-xs font-bold ${
+              value === p ? 'bg-ink text-paper' : 'bg-paper text-ink'
+            }`}
+          >
+            {t(`profile.presence.${p}`, lang)}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function PrivacySection() {
+  const { state, setPrefs, updateMe } = useApp()
+  const lang = state.lang
+  const me = state.me
+  const [presence, setPresence] = useState<Visibility>((me?.presence as Visibility) ?? 'everyone')
+  const [phoneVis, setPhoneVis] = useState<Visibility>(
+    (me?.phoneVisibility as Visibility) ?? 'contacts',
+  )
+  const [searchVis, setSearchVis] = useState<Visibility>(
+    (me?.searchVisibility as Visibility) ?? 'everyone',
+  )
+
+  const persist = (patch: { presence?: Visibility; phoneVisibility?: Visibility; searchVisibility?: Visibility }) => {
+    void updateMe(patch).catch(() => {
+      /* server save best-effort; UI keeps user's choice */
+    })
+  }
   return (
     <div>
       <SectionHeader text={t('settings.privacy', lang)} />
-      <Toggle
-        label={t('settings.lastSeen', lang)}
-        hint={lang === 'ru' ? 'Показывать другим время вашего последнего захода' : 'Show last-seen time to others'}
-        value={state.prefs.lastSeen}
-        onChange={(v) => setPrefs({ lastSeen: v })}
+      <VisibilityRow
+        label={t('profile.presence', lang)}
+        value={presence}
+        hint={lang === 'ru' ? 'Кто видит «был в сети»' : 'Who can see your last-seen time'}
+        onChange={(v) => {
+          setPresence(v)
+          persist({ presence: v })
+        }}
+      />
+      <VisibilityRow
+        label={lang === 'ru' ? 'Кто видит мой номер' : 'Who can see my phone'}
+        value={phoneVis}
+        onChange={(v) => {
+          setPhoneVis(v)
+          persist({ phoneVisibility: v })
+        }}
+      />
+      <VisibilityRow
+        label={lang === 'ru' ? 'Кто может найти меня' : 'Who can find me by handle'}
+        value={searchVis}
+        hint={
+          lang === 'ru'
+            ? '"Никто" — только люди с приглашением могут начать чат'
+            : '"Nobody" makes the account effectively invitation-only'
+        }
+        onChange={(v) => {
+          setSearchVis(v)
+          persist({ searchVisibility: v })
+        }}
       />
       <Toggle
         label={t('settings.readReceipts', lang)}
@@ -267,6 +364,36 @@ function ChatSection() {
           preview={<span className="block h-full w-full" style={opt.preview} />}
         />
       ))}
+
+      <SectionHeader text={t('settings.text', lang)} />
+      <div className="border-b border-line px-4 py-3">
+        <div className="font-bold">{t('settings.fontSize', lang)}</div>
+        <div className="mt-2 flex gap-2">
+          {(['sm', 'md', 'lg'] as const).map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => setPrefs({ fontSize: s })}
+              className={`flex-1 rounded-full border-2 border-ink px-3 py-2 font-bold ${
+                state.prefs.fontSize === s ? 'bg-ink text-paper' : 'bg-paper text-ink'
+              } ${s === 'sm' ? 'text-xs' : s === 'lg' ? 'text-base' : 'text-sm'}`}
+            >
+              {t(`settings.fontSize.${s}`, lang)}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <Toggle
+        label={t('settings.autoNight', lang)}
+        hint={
+          lang === 'ru'
+            ? 'Тёмная тема включится автоматически по системной'
+            : 'Switch to dark theme automatically when the OS prefers it'
+        }
+        value={state.prefs.autoNight}
+        onChange={(v) => setPrefs({ autoNight: v })}
+      />
 
       <SectionHeader text="Chat list" />
       <Toggle label={t('settings.compact', lang)} value={state.prefs.compactMode} onChange={(v) => setPrefs({ compactMode: v })} />
@@ -724,7 +851,8 @@ function DevicesList({ userId }: { userId: string | null }) {
 
 /* ------------ BATTERY & ANIMATIONS ------------ */
 function EditProfileSection() {
-  const { state, updateMe } = useApp()
+  const { state, updateMe, logout } = useApp()
+  const navigate = useNavigate()
   const me = state.me
   const lang = state.lang
   const [name, setName] = useState(me?.name ?? '')
@@ -732,9 +860,14 @@ function EditProfileSection() {
   const [phone, setPhone] = useState(me?.phone ?? '')
   const [links, setLinks] = useState<string[]>(me?.links?.length ? me.links : [''])
   const [avatarUrl, setAvatarUrl] = useState<string | null>(me?.avatarUrl ?? null)
+  const [avatarSvg, setAvatarSvg] = useState<string | null>(me?.avatarSvg ?? null)
+  const [status, setStatus] = useState(me?.status ?? '')
   const [busy, setBusy] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
+  const [builderOpen, setBuilderOpen] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [blocked, setBlocked] = useState<User[] | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
   const setLink = (i: number, v: string) =>
@@ -773,6 +906,8 @@ function EditProfileSection() {
         bio,
         phone,
         avatarUrl,
+        avatarSvg,
+        status,
         links: cleanedLinks,
       })
       setMsg(t('settings.saved', lang))
@@ -784,6 +919,47 @@ function EditProfileSection() {
     }
   }
 
+  const loadBlocked = async () => {
+    try {
+      const list = await api.listBlocked()
+      setBlocked(
+        list.map(
+          (u): User => ({
+            id: u.id,
+            handle: u.handle,
+            name: u.name,
+            kind: (u.kind as User['kind']) ?? 'user',
+            bio: u.bio ?? '',
+            phone: u.phone ?? '',
+            avatarUrl: u.avatarUrl ?? null,
+            avatarSvg: u.avatarSvg ?? null,
+            status: u.status ?? '',
+            presence: (u.presence as User['presence']) ?? 'everyone',
+            links: u.links ?? [],
+            lastSeen: u.lastSeen ?? undefined,
+            blocked: true,
+          }),
+        ),
+      )
+    } catch {
+      setBlocked([])
+    }
+  }
+
+  const onUnblock = async (uid: string) => {
+    try {
+      await api.unblock(uid)
+      setBlocked((arr) => (arr ?? []).filter((u) => u.id !== uid))
+    } catch {
+      /* ignore */
+    }
+  }
+
+  useEffect(() => {
+    void loadBlocked()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   if (!me) return <div className="p-6 text-muted">…</div>
 
   return (
@@ -791,7 +967,7 @@ function EditProfileSection() {
       <SectionHeader text={t('settings.editProfile', lang)} />
 
       <div className="mb-4 flex items-center gap-4">
-        <Avatar name={name || me.handle} size={72} src={avatarUrl} />
+        <Avatar name={name || me.handle} size={72} src={avatarUrl} svgConfig={avatarSvg} />
         <div className="flex flex-col gap-2">
           <input
             ref={fileRef}
@@ -802,16 +978,26 @@ function EditProfileSection() {
           />
           <button
             type="button"
+            onClick={() => setBuilderOpen(true)}
+            className="rounded-full border-2 border-ink bg-ink px-4 py-2 text-sm font-bold text-paper"
+          >
+            {t('avatar.build', lang)}
+          </button>
+          <button
+            type="button"
             onClick={() => fileRef.current?.click()}
             disabled={uploading}
             className="rounded-full border-2 border-ink px-4 py-2 text-sm font-bold disabled:opacity-50"
           >
             {uploading ? '…' : t('profile.changeAvatar', lang)}
           </button>
-          {avatarUrl && (
+          {(avatarUrl || avatarSvg) && (
             <button
               type="button"
-              onClick={() => setAvatarUrl(null)}
+              onClick={() => {
+                setAvatarUrl(null)
+                setAvatarSvg(null)
+              }}
               className="rounded-full border-2 border-ink/40 px-4 py-2 text-sm font-bold text-ink/70"
             >
               {t('profile.removeAvatar', lang)}
@@ -819,6 +1005,16 @@ function EditProfileSection() {
           )}
         </div>
       </div>
+      <AvatarBuilder
+        open={builderOpen}
+        initial={decodeAvatarConfig(avatarSvg)}
+        defaultLetter={(name || '').slice(0, 1).toUpperCase()}
+        onClose={() => setBuilderOpen(false)}
+        onSave={(cfg) => {
+          setAvatarSvg(encodeAvatarConfig(cfg))
+          setBuilderOpen(false)
+        }}
+      />
 
       <label className="mb-2 mt-3 block text-xs font-bold uppercase tracking-wider text-ink/60">
         {t('profile.name', lang)}
@@ -827,6 +1023,17 @@ function EditProfileSection() {
         value={name}
         onChange={(e) => setName(e.target.value)}
         maxLength={80}
+        className="w-full rounded-xl border-2 border-ink bg-paper px-3 py-2 text-base focus:outline-none"
+      />
+
+      <label className="mb-2 mt-4 block text-xs font-bold uppercase tracking-wider text-ink/60">
+        {t('profile.status', lang)}
+      </label>
+      <input
+        value={status}
+        onChange={(e) => setStatus(e.target.value)}
+        maxLength={140}
+        placeholder={t('profile.statusPlaceholder', lang)}
         className="w-full rounded-xl border-2 border-ink bg-paper px-3 py-2 text-base focus:outline-none"
       />
 
@@ -895,7 +1102,120 @@ function EditProfileSection() {
         {busy ? '…' : t('common.save', lang)}
       </button>
       {msg && <p className="mt-3 text-center text-sm">{msg}</p>}
+
+      {blocked && blocked.length > 0 && (
+        <>
+          <div className="mt-8 mb-2 text-xs font-bold uppercase tracking-wider text-ink/60">
+            {t('profile.blocked', lang)}
+          </div>
+          <ul className="flex flex-col gap-2">
+            {blocked.map((u) => (
+              <li
+                key={u.id}
+                className="flex items-center gap-3 rounded-xl border-2 border-ink px-3 py-2"
+              >
+                <Avatar
+                  name={u.name}
+                  src={u.avatarUrl}
+                  svgConfig={u.avatarSvg}
+                  size={36}
+                />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-black">{u.name}</div>
+                  <div className="truncate text-[11px] text-ink/60">@{u.handle}</div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void onUnblock(u.id)}
+                  className="rounded-full border-2 border-ink px-3 py-1 text-xs font-bold"
+                >
+                  {t('profile.unblock', lang)}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+
+      <button
+        type="button"
+        onClick={() => setDeleteOpen(true)}
+        className="mt-8 w-full rounded-full border-2 border-ink/60 bg-paper py-3 text-sm font-bold text-ink/80 underline decoration-ink underline-offset-4"
+      >
+        {t('profile.deleteAccount', lang)}
+      </button>
+
+      <DeleteAccountModal
+        open={deleteOpen}
+        handle={me.handle}
+        onClose={() => setDeleteOpen(false)}
+        onConfirmed={() => {
+          setDeleteOpen(false)
+          logout()
+          navigate('/welcome', { replace: true })
+        }}
+      />
     </div>
+  )
+}
+
+function DeleteAccountModal({
+  open,
+  handle,
+  onClose,
+  onConfirmed,
+}: {
+  open: boolean
+  handle: string
+  onClose: () => void
+  onConfirmed: () => void
+}) {
+  const { state } = useApp()
+  const lang = state.lang
+  const [typed, setTyped] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const ok = typed.trim().toLowerCase().replace(/^@/, '') === handle.toLowerCase()
+  return (
+    <Modal open={open} onClose={onClose} title={t('profile.deleteAccount', lang)} align="center">
+      <p className="mb-3 text-sm">{t('profile.deleteConfirm', lang)}</p>
+      <input
+        autoFocus
+        value={typed}
+        onChange={(e) => setTyped(e.target.value)}
+        placeholder={`@${handle}`}
+        className="mb-3 w-full rounded-xl border-2 border-ink bg-paper px-3 py-2 text-base focus:outline-none"
+      />
+      {err && <p className="mb-2 text-sm text-red-700">{err}</p>}
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={onClose}
+          className="flex-1 rounded-full border-2 border-ink px-3 py-2 text-sm font-bold"
+        >
+          {t('common.cancel', lang)}
+        </button>
+        <button
+          type="button"
+          disabled={!ok || busy}
+          onClick={async () => {
+            setBusy(true)
+            setErr(null)
+            try {
+              await api.deleteAccount(typed.trim())
+              onConfirmed()
+            } catch (e) {
+              setErr(e instanceof Error ? e.message : 'Failed')
+            } finally {
+              setBusy(false)
+            }
+          }}
+          className="flex-1 rounded-full border-2 border-ink bg-ink px-3 py-2 text-sm font-bold text-paper disabled:opacity-40"
+        >
+          {busy ? '…' : t('common.delete', lang)}
+        </button>
+      </div>
+    </Modal>
   )
 }
 

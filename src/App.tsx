@@ -22,24 +22,60 @@ import { TabBar, DesktopSidebar } from './components/TabBar'
 import { TopBar } from './components/TopBar'
 import { ToastHost } from './components/Toast'
 import { PasscodeLockGate } from './components/PasscodeLockGate'
+import { ReleaseBanner } from './components/ReleaseBanner'
 
 const TOP_TAB_ROUTES = ['/chats', '/calendar', '/notes', '/news', '/menu']
+
+const THEME_META_COLOR: Record<string, string> = {
+  dark: '#0b0b0b',
+  paper: '#f5f1e8',
+  inverse: '#000000',
+  light: '#ffffff',
+}
+
+function applyTheme(theme: string): void {
+  document.documentElement.setAttribute('data-theme', theme)
+  const meta = document.querySelector('meta[name="theme-color"]')
+  if (meta) meta.setAttribute('content', THEME_META_COLOR[theme] ?? '#ffffff')
+}
 
 function ThemeSync() {
   const { state } = useApp()
   useEffect(() => {
     const root = document.documentElement
-    root.setAttribute('data-theme', state.prefs.theme)
+    const prefersDark =
+      typeof window !== 'undefined' &&
+      window.matchMedia &&
+      window.matchMedia('(prefers-color-scheme: dark)').matches
+    const effectiveTheme = state.prefs.autoNight
+      ? prefersDark
+        ? 'dark'
+        : 'light'
+      : state.prefs.theme
+    applyTheme(effectiveTheme)
     root.setAttribute('data-wallpaper', state.prefs.wallpaper)
+    root.setAttribute('data-font', state.prefs.fontSize)
     const motionOff = !state.prefs.animations || state.prefs.reduceMotion
     root.setAttribute('data-motion', motionOff ? 'off' : 'on')
-    const meta = document.querySelector('meta[name="theme-color"]')
-    if (meta) {
-      const color =
-        state.prefs.theme === 'dark' ? '#0b0b0b' : state.prefs.theme === 'paper' ? '#f5f1e8' : state.prefs.theme === 'inverse' ? '#000000' : '#ffffff'
-      meta.setAttribute('content', color)
-    }
-  }, [state.prefs.theme, state.prefs.wallpaper, state.prefs.animations, state.prefs.reduceMotion])
+  }, [
+    state.prefs.theme,
+    state.prefs.wallpaper,
+    state.prefs.animations,
+    state.prefs.reduceMotion,
+    state.prefs.fontSize,
+    state.prefs.autoNight,
+  ])
+
+  // Listen for OS theme changes when autoNight is on so the UI (incl. the
+  // browser chrome theme-color meta tag) flips immediately without waiting
+  // for the next prefs change.
+  useEffect(() => {
+    if (!state.prefs.autoNight) return
+    const mql = window.matchMedia('(prefers-color-scheme: dark)')
+    const onChange = () => applyTheme(mql.matches ? 'dark' : 'light')
+    mql.addEventListener('change', onChange)
+    return () => mql.removeEventListener('change', onChange)
+  }, [state.prefs.autoNight])
   return null
 }
 
@@ -82,6 +118,7 @@ function Shell() {
         </div>
       </main>
       {!hideChrome && <TabBar />}
+      {!hideChrome && <ReleaseBanner />}
     </div>
   )
 }

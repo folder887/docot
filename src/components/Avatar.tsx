@@ -1,3 +1,5 @@
+import { AvatarSVG, decodeAvatarConfig } from './AvatarSVG'
+
 function initials(name: string) {
   return name
     .split(/\s+/)
@@ -12,14 +14,22 @@ export function Avatar({
   size = 44,
   filled,
   src,
+  svgConfig,
 }: {
   name: string
   size?: number
   filled?: boolean
   /** When set, renders the image and falls back to initials if it fails. */
   src?: string | null
+  /** When set, renders a constructed paper-doll avatar from the JSON config.
+   * Takes precedence over `src`. */
+  svgConfig?: string | null
 }) {
   const style = { width: size, height: size, fontSize: size * 0.38 }
+  const cfg = decodeAvatarConfig(svgConfig)
+  if (cfg) {
+    return <AvatarSVG config={cfg} size={size} rounded />
+  }
   if (src) {
     return (
       <img

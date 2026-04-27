@@ -52,6 +52,10 @@ def current_user(
     user = db.get(User, uid)
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    # Soft-deleted accounts (delete_account clears password_hash) must be
+    # rejected immediately so existing JWTs cannot resurrect the user.
+    if not user.password_hash:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Account deleted")
     # best-effort last-seen tick; don't block request on commit failure
     try:
         user.last_seen_at = int(time.time() * 1000)
@@ -70,7 +74,16 @@ def user_from_token(token: str, db: Session) -> User | None:
     uid = payload.get("sub")
     if not uid:
         return None
-    return db.get(User, uid)
+    user = db.get(User, uid)
+    if not user:
+        return None
+    # Soft-deleted accounts (password_hash cleared by delete_account) must be
+    # rejected here too — the WebSocket handler authenticates via this
+    # function and would otherwise let a deleted user keep receiving
+    # broadcasts on stale JWTs.
+    if not user.password_hash:
+        return None
+    return user
 
 
 def get_bearer_from_request(request: Request) -> str | None:

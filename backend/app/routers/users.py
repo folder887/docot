@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -12,21 +13,92 @@ from ..schemas import UserOut, UserUpdateIn
 router = APIRouter(prefix="/users", tags=["users"])
 
 
-def _out(u: User, me_contacts: dict[str, Contact] | None = None) -> UserOut:
+def _viewer_in_target_contacts(db: Session, viewer_id: str, target_id: str) -> bool:
+    """Return True iff the *target* user has the viewer in their contact list.
+
+    Presence privacy `contacts` is asymmetric: A's lastSeen is visible only to
+    people that *A* has added as contacts (not to people who have added A).
+    """
+    return (
+        db.query(Contact.id)
+        .filter(
+            Contact.owner_id == target_id,
+            Contact.contact_id == viewer_id,
+            Contact.blocked.is_(False),
+        )
+        .first()
+        is not None
+    )
+
+
+def _viewers_in_targets_contacts(
+    db: Session, viewer_id: str, target_ids: list[str]
+) -> set[str]:
+    if not target_ids:
+        return set()
+    rows = (
+        db.query(Contact.owner_id)
+        .filter(
+            Contact.contact_id == viewer_id,
+            Contact.owner_id.in_(target_ids),
+            Contact.blocked.is_(False),
+        )
+        .all()
+    )
+    return {r[0] for r in rows}
+
+
+def _out(
+    u: User,
+    me_contacts: dict[str, Contact] | None = None,
+    *,
+    is_self: bool = False,
+    viewer_in_target_contacts: bool = False,
+) -> UserOut:
     info = me_contacts.get(u.id) if me_contacts else None
     raw_links = (getattr(u, "links", "") or "").split("\n")
     links = [ln.strip() for ln in raw_links if ln and ln.strip()]
     avatar_url = getattr(u, "avatar_url", "") or None
+    avatar_svg = getattr(u, "avatar_svg", "") or None
+    status = getattr(u, "status", "") or None
+    presence = getattr(u, "presence", "everyone") or "everyone"
+    phone_visibility = getattr(u, "phone_visibility", "contacts") or "contacts"
+    search_visibility = getattr(u, "search_visibility", "everyone") or "everyone"
+
+    def _gated(value: str, mode: str) -> str:
+        if is_self:
+            return value
+        if mode == "nobody":
+            return ""
+        if mode == "contacts" and not viewer_in_target_contacts:
+            return ""
+        return value
+
+    # Honour presence privacy. `contacts` means "only people I've added see
+    # my lastSeen" — i.e. the *target* must have the viewer in their contacts,
+    # not the other way around (that's `info`, viewer's view of target).
+    last_seen: int | None = u.last_seen_at
+    if not is_self:
+        if presence == "nobody":
+            last_seen = None
+        elif presence == "contacts" and not viewer_in_target_contacts:
+            last_seen = None
+    phone = _gated(u.phone or "", phone_visibility)
     return UserOut(
         id=u.id,
         handle=u.handle,
         name=u.name,
         bio=u.bio,
         kind=u.kind,
-        phone=u.phone,
+        phone=phone,
         avatarUrl=avatar_url,
+        avatarSvg=avatar_svg,
+        status=status,
+        presence=presence,
+        phoneVisibility=phone_visibility,
+        searchVisibility=search_visibility,
         links=links,
-        lastSeen=u.last_seen_at,
+        lastSeen=last_seen,
         isContact=bool(info),
         blocked=bool(info and info.blocked),
     )
@@ -60,11 +132,27 @@ def search(
         .limit(20)
         .all()
     )
+    # Discoverability gating. Three modes:
+    #   everyone  → always visible in search
+    #   contacts  → visible only if the target has the viewer as a contact
+    #   nobody    → never visible in search (effectively invitation-only)
+    if rows:
+        viewer_in = _viewers_in_targets_contacts(db, me.id, [u.id for u in rows])
+        kept: list[User] = []
+        for u in rows:
+            mode = getattr(u, "search_visibility", "everyone") or "everyone"
+            if mode == "everyone":
+                kept.append(u)
+            elif mode == "contacts" and u.id in viewer_in:
+                kept.append(u)
+            # mode == "nobody": always skipped
+        rows = kept
     contacts = {
         c.contact_id: c
         for c in db.query(Contact).filter(Contact.owner_id == me.id).all()
     }
-    return [_out(u, contacts) for u in rows]
+    visible = _viewers_in_targets_contacts(db, me.id, [u.id for u in rows])
+    return [_out(u, contacts, viewer_in_target_contacts=u.id in visible) for u in rows]
 
 
 @router.get("/{user_id}", response_model=UserOut)
@@ -83,7 +171,13 @@ def get_user(
         .filter(Contact.owner_id == me.id, Contact.contact_id == u.id)
         .first()
     )
-    return _out(u, {u.id: c} if c else None)
+    return _out(
+        u,
+        {u.id: c} if c else None,
+        is_self=u.id == me.id,
+        viewer_in_target_contacts=u.id != me.id
+        and _viewer_in_target_contacts(db, me.id, u.id),
+    )
 
 
 @router.patch("/me", response_model=UserOut)
@@ -100,6 +194,16 @@ def update_me(
         me.phone = body.phone
     if body.avatarUrl is not None:
         me.avatar_url = body.avatarUrl.strip()
+    if body.avatarSvg is not None:
+        me.avatar_svg = body.avatarSvg.strip()
+    if body.status is not None:
+        me.status = body.status.strip()[:140]
+    if body.presence is not None:
+        me.presence = body.presence
+    if body.phoneVisibility is not None:
+        me.phone_visibility = body.phoneVisibility
+    if body.searchVisibility is not None:
+        me.search_visibility = body.searchVisibility
     if body.links is not None:
         cleaned = [ln.strip() for ln in body.links if ln and ln.strip()]
         # Validate each link is an absolute http(s) URL — keeps the API from
@@ -113,7 +217,7 @@ def update_me(
     db.add(me)
     db.commit()
     db.refresh(me)
-    return _out(me)
+    return _out(me, is_self=True)
 
 
 @router.post("/{user_id}/contact", response_model=UserOut)
@@ -140,7 +244,11 @@ def add_contact(
         db.add(contact)
     db.commit()
     db.refresh(contact)
-    return _out(target, {target.id: contact})
+    return _out(
+        target,
+        {target.id: contact},
+        viewer_in_target_contacts=_viewer_in_target_contacts(db, me.id, target.id),
+    )
 
 
 @router.delete("/{user_id}/contact", response_model=UserOut)
@@ -156,7 +264,10 @@ def remove_contact(
         Contact.owner_id == me.id, Contact.contact_id == target.id
     ).delete()
     db.commit()
-    return _out(target)
+    return _out(
+        target,
+        viewer_in_target_contacts=_viewer_in_target_contacts(db, me.id, target.id),
+    )
 
 
 @router.post("/{user_id}/block", response_model=UserOut)
@@ -180,7 +291,11 @@ def block(
         c.blocked = True
     db.commit()
     db.refresh(c)
-    return _out(target, {target.id: c})
+    return _out(
+        target,
+        {target.id: c},
+        viewer_in_target_contacts=_viewer_in_target_contacts(db, me.id, target.id),
+    )
 
 
 @router.post("/{user_id}/unblock", response_model=UserOut)
@@ -200,7 +315,64 @@ def unblock(
     if c:
         c.blocked = False
         db.commit()
-    return _out(target, {target.id: c} if c else None)
+    return _out(
+        target,
+        {target.id: c} if c else None,
+        viewer_in_target_contacts=_viewer_in_target_contacts(db, me.id, target.id),
+    )
+
+
+@router.get("/me/blocked", response_model=list[UserOut])
+def list_blocked(
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> list[UserOut]:
+    rows = (
+        db.query(Contact, User)
+        .join(User, User.id == Contact.contact_id)
+        .filter(Contact.owner_id == me.id, Contact.blocked.is_(True))
+        .all()
+    )
+    visible = _viewers_in_targets_contacts(db, me.id, [u.id for _, u in rows])
+    return [
+        _out(u, {u.id: c}, viewer_in_target_contacts=u.id in visible)
+        for c, u in rows
+    ]
+
+
+class _DeleteAccountIn(BaseModel):
+    handle: str
+
+
+@router.delete("/me")
+def delete_account(
+    body: _DeleteAccountIn,
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Permanent account deletion.
+
+    Requires the caller to retype their @handle as a confirmation token. We
+    null out the user's PII in place rather than deleting the row so that
+    foreign-key references (messages, posts, chat membership) remain valid;
+    chats containing only the deleted user are left dangling but become
+    orphaned (no other member can re-join).
+    """
+    expected = me.handle.lstrip("@").lower()
+    given = body.handle.strip().lstrip("@").lower()
+    if not given or given != expected:
+        raise HTTPException(status_code=400, detail="Handle does not match")
+    me.handle = f"deleted_{me.id}"
+    me.name = "Deleted user"
+    me.password_hash = ""
+    me.bio = ""
+    me.phone = ""
+    me.avatar_url = ""
+    me.avatar_svg = ""
+    me.status = ""
+    me.links = ""
+    db.commit()
+    return {"ok": True}
 
 
 @router.get("", response_model=list[UserOut])
@@ -214,13 +386,17 @@ def list_contacts(
         .filter(Contact.owner_id == me.id)
         .all()
     )
-    return [_out(u, {u.id: c}) for c, u in rows]
+    visible = _viewers_in_targets_contacts(db, me.id, [u.id for _, u in rows])
+    return [
+        _out(u, {u.id: c}, viewer_in_target_contacts=u.id in visible)
+        for c, u in rows
+    ]
 
 
 # --- Bot creation -----------------------------------------------------------
 import re as _re
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from ..auth import hash_password
 

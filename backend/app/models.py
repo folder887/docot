@@ -33,6 +33,20 @@ class User(Base):
     kind: Mapped[str] = mapped_column(String(16), default="user")
     phone: Mapped[str] = mapped_column(String(32), default="")
     avatar_url: Mapped[str] = mapped_column(String(500), default="")
+    # Compact JSON config (rendered client-side as an SVG paper-doll). When
+    # non-empty, the client prefers it over `avatar_url`.
+    avatar_svg: Mapped[str] = mapped_column(Text, default="")
+    # Free-form short status (e.g. "👋 hi"). Public.
+    status: Mapped[str] = mapped_column(String(140), default="")
+    # Presence privacy — controls whether `last_seen_at` is exposed to peers.
+    # Values: "everyone" | "contacts" | "nobody". Default keeps prior
+    # behaviour (everyone sees lastSeen).
+    presence: Mapped[str] = mapped_column(String(16), default="everyone")
+    # Phone-number visibility (independent of presence). Same vocabulary.
+    phone_visibility: Mapped[str] = mapped_column(String(16), default="contacts")
+    # Discoverability via /users/search by handle/name. "nobody" makes the
+    # account effectively invitation-only (existing contacts/DMs still work).
+    search_visibility: Mapped[str] = mapped_column(String(16), default="everyone")
     # Links serialised as newline-separated URLs to avoid a 1:N table for
     # what is effectively a single short list per user.
     links: Mapped[str] = mapped_column(Text, default="")
@@ -58,6 +72,9 @@ class Chat(Base):
     slow_mode_seconds: Mapped[int] = mapped_column(Integer, default=0)
     subscribers_only: Mapped[bool] = mapped_column(Boolean, default=False)
     signed_posts: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Per-chat retention. Messages older than this are tomb-stoned by the
+    # `purge_expired_messages` background task. 0 disables auto-delete.
+    auto_delete_seconds: Mapped[int] = mapped_column(Integer, default=0)
     created_by: Mapped[str] = mapped_column(String, ForeignKey("users.id"))
     created_at: Mapped[int] = mapped_column(Integer, default=now_ms)
     updated_at: Mapped[int] = mapped_column(Integer, default=now_ms)
@@ -101,6 +118,11 @@ class Message(Base):
     # the sender from chat context (DM has only two participants) and the
     # Signal PreKey envelope carries the verified sender identity key.
     sealed: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Pinned messages — admins/owners (and the author in self-DMs) can pin
+    # any number of messages within a chat. Pin metadata travels with the
+    # message in the API; the client renders a pinned-bar header.
+    pinned: Mapped[bool] = mapped_column(Boolean, default=False)
+    pinned_at: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
 
     chat: Mapped[Chat] = relationship(back_populates="messages")
 

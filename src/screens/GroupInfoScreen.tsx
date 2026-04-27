@@ -459,6 +459,7 @@ function EditSheet({
     slowModeSeconds?: number
     subscribersOnly?: boolean
     signedPosts?: boolean
+    autoDeleteSeconds?: number
   }) => Promise<void>
 }) {
   const { state } = useApp()
@@ -468,6 +469,7 @@ function EditSheet({
   const [slowSec, setSlowSec] = useState(chat.slowModeSeconds ?? 0)
   const [subOnly, setSubOnly] = useState(!!chat.subscribersOnly)
   const [signed, setSigned] = useState(!!chat.signedPosts)
+  const [autoDel, setAutoDel] = useState(chat.autoDeleteSeconds ?? 0)
   useEffect(() => {
     if (!open) return
     queueMicrotask(() => {
@@ -477,6 +479,7 @@ function EditSheet({
       setSlowSec(chat.slowModeSeconds ?? 0)
       setSubOnly(!!chat.subscribersOnly)
       setSigned(!!chat.signedPosts)
+      setAutoDel(chat.autoDeleteSeconds ?? 0)
     })
   }, [open, chat])
   return (
@@ -492,6 +495,7 @@ function EditSheet({
             slowModeSeconds: slowSec,
             subscribersOnly: subOnly,
             signedPosts: signed,
+            autoDeleteSeconds: autoDel,
           })
         }}
       >
@@ -554,6 +558,28 @@ function EditSheet({
             className="bw-input"
           />
         </label>
+        <div className="flex flex-col gap-2 rounded-2xl border border-line px-3 py-2">
+          <span className="text-sm font-bold">{t('autodelete.title', state.lang)}</span>
+          <div className="flex gap-1">
+            {[
+              { v: 0, k: 'autodelete.off' },
+              { v: 24 * 3600, k: 'autodelete.day' },
+              { v: 7 * 24 * 3600, k: 'autodelete.week' },
+              { v: 30 * 24 * 3600, k: 'autodelete.month' },
+            ].map(({ v, k }) => (
+              <button
+                type="button"
+                key={v}
+                onClick={() => setAutoDel(v)}
+                className={`flex-1 rounded-full border-2 border-ink px-2 py-1.5 text-xs font-bold ${
+                  autoDel === v ? 'bg-ink text-paper' : 'bg-paper text-ink'
+                }`}
+              >
+                {t(k, state.lang)}
+              </button>
+            ))}
+          </div>
+        </div>
         <div className="flex gap-3">
           <button type="button" className="bw-btn-ghost flex-1" onClick={onClose}>
             {t('common.cancel', state.lang)}

@@ -12,7 +12,7 @@ docot is a single React + Vite codebase that ships as:
 ```bash
 npm install
 npm run build           # static dist/ for any host or PWA install
-VITE_API_URL=https://docot-backend-wvkjcktl.fly.dev npm run build
+VITE_API_URL=https://docot-backend-ryhccesj.fly.dev npm run build
 ```
 
 Set `VITE_API_URL` to point the bundle at your backend at build time.

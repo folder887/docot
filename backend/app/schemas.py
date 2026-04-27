@@ -45,6 +45,11 @@ class UserOut(BaseModel):
     kind: str = "user"
     phone: str = ""
     avatarUrl: str | None = None
+    avatarSvg: str | None = None
+    status: str | None = None
+    presence: str = "everyone"
+    phoneVisibility: str = "contacts"
+    searchVisibility: str = "everyone"
     links: list[str] = []
     lastSeen: int | None = None
     isContact: bool = False
@@ -59,6 +64,11 @@ class UserUpdateIn(BaseModel):
     bio: str | None = None
     phone: str | None = None
     avatarUrl: str | None = Field(default=None, max_length=500)
+    avatarSvg: str | None = Field(default=None, max_length=4000)
+    status: str | None = Field(default=None, max_length=140)
+    presence: str | None = Field(default=None, pattern="^(everyone|contacts|nobody)$")
+    phoneVisibility: str | None = Field(default=None, pattern="^(everyone|contacts|nobody)$")
+    searchVisibility: str | None = Field(default=None, pattern="^(everyone|contacts|nobody)$")
     links: list[str] | None = Field(default=None, max_length=10)
 
 
@@ -77,6 +87,8 @@ class MessageOut(BaseModel):
     deletedAt: int | None = None
     replyToId: str | None = None
     sealed: bool = False
+    pinned: bool = False
+    pinnedAt: int | None = None
     reactions: list[ReactionAggOut] = []
 
     class Config:
@@ -112,6 +124,7 @@ class ChatOut(BaseModel):
     slowModeSeconds: int = 0
     subscribersOnly: bool = False
     signedPosts: bool = False
+    autoDeleteSeconds: int = 0
     createdBy: str | None = None
     participants: list[str]
     pinned: bool = False
@@ -137,6 +150,7 @@ class ChatPatch(BaseModel):
     slowModeSeconds: int | None = Field(default=None, ge=0, le=3600)
     subscribersOnly: bool | None = None
     signedPosts: bool | None = None
+    autoDeleteSeconds: int | None = Field(default=None, ge=0, le=60 * 60 * 24 * 365)
 
 
 class ChatMemberOut(BaseModel):
