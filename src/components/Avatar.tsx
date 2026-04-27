@@ -28,7 +28,7 @@ export function Avatar({
   const style = { width: size, height: size, fontSize: size * 0.38 }
   const cfg = decodeAvatarConfig(svgConfig)
   if (cfg) {
-    return <AvatarSVG config={cfg} size={size} />
+    return <AvatarSVG config={cfg} size={size} rounded />
   }
   if (src) {
     return (

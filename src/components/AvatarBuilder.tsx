@@ -1,193 +1,162 @@
-/* AvatarBuilder — modal that lets the user assemble a paper-doll avatar
- * from a small set of layered SVG primitives, then persist it to their
- * profile as a compact JSON config.
- */
-
 import { useState } from 'react'
+
 import { Modal } from './Modal'
 import {
   AvatarSVG,
-  BG,
-  SKIN,
-  HEAD,
-  HAIR,
-  EYES,
-  MOUTH,
-  ACCESSORY,
+  BG_COLORS,
   DEFAULT_AVATAR,
+  PATTERNS,
+  ROTATIONS,
   type AvatarConfig,
+  type BgColor,
+  type Pattern,
+  type Rotation,
 } from './AvatarSVG'
 import { useApp } from '../store'
 import { t } from '../i18n'
 
-type Tab = 'bg' | 'skin' | 'head' | 'hair' | 'eyes' | 'mouth' | 'accessory'
-
-const TABS: { key: Tab; labelKey: string }[] = [
-  { key: 'bg', labelKey: 'avatar.bg' },
-  { key: 'skin', labelKey: 'avatar.skin' },
-  { key: 'head', labelKey: 'avatar.head' },
-  { key: 'hair', labelKey: 'avatar.hair' },
-  { key: 'eyes', labelKey: 'avatar.eyes' },
-  { key: 'mouth', labelKey: 'avatar.mouth' },
-  { key: 'accessory', labelKey: 'avatar.accessory' },
-]
-
-function randomConfig(): AvatarConfig {
-  const pick = <T,>(arr: readonly T[]): T => arr[Math.floor(Math.random() * arr.length)]
+function randomConfig(initial: string): AvatarConfig {
   return {
-    bg: pick(Object.keys(BG)) as keyof typeof BG,
-    skin: pick(Object.keys(SKIN)) as keyof typeof SKIN,
-    head: pick(HEAD),
-    hair: pick(HAIR),
-    eyes: pick(EYES),
-    mouth: pick(MOUTH),
-    accessory: pick(ACCESSORY),
+    bg: BG_COLORS[Math.floor(Math.random() * BG_COLORS.length)],
+    pattern: PATTERNS[Math.floor(Math.random() * PATTERNS.length)],
+    rot: ROTATIONS[Math.floor(Math.random() * ROTATIONS.length)],
+    initial,
   }
 }
 
 export function AvatarBuilder({
   open,
   initial,
+  defaultLetter = '',
   onClose,
   onSave,
 }: {
   open: boolean
-  initial: AvatarConfig | null
+  initial?: AvatarConfig | null
+  defaultLetter?: string
   onClose: () => void
-  onSave: (config: AvatarConfig) => void | Promise<void>
+  onSave: (cfg: AvatarConfig) => void
 }) {
   const { state } = useApp()
-  const lang = state.lang
-  const [config, setConfig] = useState<AvatarConfig>(initial ?? DEFAULT_AVATAR)
-  const [tab, setTab] = useState<Tab>('bg')
-  const [busy, setBusy] = useState(false)
+  const [cfg, setCfg] = useState<AvatarConfig>(
+    initial ?? { ...DEFAULT_AVATAR, initial: defaultLetter.slice(0, 1).toUpperCase() },
+  )
 
-  const set = <K extends keyof AvatarConfig>(k: K, v: AvatarConfig[K]) =>
-    setConfig((c) => ({ ...c, [k]: v }))
+  if (!open) return null
 
-  const renderOptions = () => {
-    switch (tab) {
-      case 'bg':
-        return (
-          <div className="grid grid-cols-4 gap-2">
-            {(Object.keys(BG) as (keyof typeof BG)[]).map((k) => (
+  const setBg = (bg: BgColor) => setCfg((c) => ({ ...c, bg }))
+  const setPattern = (pattern: Pattern) => setCfg((c) => ({ ...c, pattern }))
+  const setRot = (rot: Rotation) => setCfg((c) => ({ ...c, rot }))
+  const setInitial = (s: string) =>
+    setCfg((c) => ({ ...c, initial: s.slice(0, 1).toUpperCase() }))
+
+  return (
+    <Modal open={open} onClose={onClose} title={t('avatar.title', state.lang)}>
+      <div className="flex flex-col items-stretch gap-4">
+        <div className="flex flex-col items-center gap-3">
+          <AvatarSVG config={cfg} size={160} rounded />
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => setCfg(randomConfig(cfg.initial))}
+              className="bw-btn"
+            >
+              {t('avatar.random', state.lang)}
+            </button>
+          </div>
+        </div>
+
+        {/* Background */}
+        <div>
+          <div className="mb-1 text-[11px] font-bold uppercase tracking-wider opacity-60">
+            {t('avatar.bg', state.lang)}
+          </div>
+          <div className="flex gap-2">
+            {BG_COLORS.map((c) => (
               <button
-                key={k}
+                key={c}
                 type="button"
-                onClick={() => set('bg', k)}
-                className={`flex h-12 items-center justify-center rounded-xl border-2 ${
-                  config.bg === k ? 'border-ink ring-2 ring-ink' : 'border-ink/40'
-                }`}
-                style={{ background: BG[k] }}
-                aria-label={k}
+                aria-label={c}
+                onClick={() => setBg(c)}
+                className={`h-10 w-10 border-2 border-ink ${cfg.bg === c ? 'ring-2 ring-ink ring-offset-2 ring-offset-paper' : ''}`}
+                style={{ background: c }}
               />
             ))}
           </div>
-        )
-      case 'skin':
-        return (
-          <div className="grid grid-cols-3 gap-2">
-            {(Object.keys(SKIN) as (keyof typeof SKIN)[]).map((k) => (
-              <button
-                key={k}
-                type="button"
-                onClick={() => set('skin', k)}
-                className={`flex h-12 items-center justify-center rounded-xl border-2 ${
-                  config.skin === k ? 'border-ink ring-2 ring-ink' : 'border-ink/40'
-                }`}
-                style={{ background: SKIN[k] }}
-                aria-label={k}
-              />
-            ))}
+        </div>
+
+        {/* Pattern */}
+        <div>
+          <div className="mb-1 text-[11px] font-bold uppercase tracking-wider opacity-60">
+            {t('avatar.pattern', state.lang)}
           </div>
-        )
-      case 'head':
-      case 'hair':
-      case 'eyes':
-      case 'mouth':
-      case 'accessory': {
-        const opts =
-          tab === 'head' ? HEAD : tab === 'hair' ? HAIR : tab === 'eyes' ? EYES : tab === 'mouth' ? MOUTH : ACCESSORY
-        return (
-          <div className="grid grid-cols-4 gap-2">
-            {opts.map((opt) => {
-              const previewConfig = { ...config, [tab]: opt } as AvatarConfig
-              const selected = (config as Record<string, string>)[tab] === opt
+          <div className="grid grid-cols-6 gap-2">
+            {PATTERNS.map((p) => {
+              const sample: AvatarConfig = { ...cfg, pattern: p, initial: '' }
+              const active = cfg.pattern === p
               return (
                 <button
-                  key={opt}
+                  key={p}
                   type="button"
-                  onClick={() => set(tab, opt as never)}
-                  className={`flex flex-col items-center gap-1 rounded-xl border-2 p-2 ${
-                    selected ? 'border-ink ring-2 ring-ink' : 'border-ink/40'
-                  }`}
+                  onClick={() => setPattern(p)}
+                  className={`flex items-center justify-center rounded-sm border-2 ${active ? 'border-ink ring-2 ring-ink ring-offset-2 ring-offset-paper' : 'border-ink/30'}`}
                 >
-                  <AvatarSVG config={previewConfig} size={56} />
-                  <span className="text-[10px] font-bold capitalize">{opt}</span>
+                  <AvatarSVG config={sample} size={44} />
                 </button>
               )
             })}
           </div>
-        )
-      }
-    }
-  }
-
-  return (
-    <Modal open={open} onClose={onClose} title={t('avatar.title', lang)} align="center">
-      <div className="flex flex-col items-center gap-4">
-        <AvatarSVG config={config} size={144} />
-
-        <div className="flex flex-wrap justify-center gap-2">
-          {TABS.map((tabDef) => (
-            <button
-              key={tabDef.key}
-              type="button"
-              onClick={() => setTab(tabDef.key)}
-              className={`rounded-full border-2 border-ink px-3 py-1 text-xs font-bold ${
-                tab === tabDef.key ? 'bg-ink text-paper' : 'bg-paper text-ink'
-              }`}
-            >
-              {t(tabDef.labelKey, lang)}
-            </button>
-          ))}
         </div>
 
-        <div className="w-full">{renderOptions()}</div>
+        {/* Rotation */}
+        <div>
+          <div className="mb-1 text-[11px] font-bold uppercase tracking-wider opacity-60">
+            {t('avatar.rot', state.lang)}
+          </div>
+          <div className="flex gap-2">
+            {ROTATIONS.map((r) => (
+              <button
+                key={r}
+                type="button"
+                onClick={() => setRot(r)}
+                className={`bw-btn !px-3 !py-1.5 text-xs ${cfg.rot === r ? '!bg-ink !text-paper' : ''}`}
+              >
+                {r}°
+              </button>
+            ))}
+          </div>
+        </div>
 
-        <div className="flex w-full gap-2">
-          <button
-            type="button"
-            onClick={() => setConfig(randomConfig())}
-            className="flex-1 rounded-full border-2 border-ink bg-paper px-3 py-2 text-sm font-bold transition-transform active:scale-95"
-          >
-            🎲 {t('avatar.random', lang)}
+        {/* Initial letter */}
+        <div>
+          <div className="mb-1 text-[11px] font-bold uppercase tracking-wider opacity-60">
+            {t('avatar.initial', state.lang)}
+          </div>
+          <input
+            type="text"
+            value={cfg.initial}
+            maxLength={1}
+            onChange={(e) => setInitial(e.target.value)}
+            placeholder="A"
+            className="bw-input w-20 text-center font-black uppercase"
+          />
+        </div>
+
+        <div className="mt-2 flex justify-end gap-2 border-t-2 border-ink pt-3">
+          <button type="button" onClick={onClose} className="bw-btn">
+            {t('common.cancel', state.lang)}
           </button>
           <button
             type="button"
-            onClick={() => setConfig(DEFAULT_AVATAR)}
-            className="flex-1 rounded-full border-2 border-ink bg-paper px-3 py-2 text-sm font-bold"
-          >
-            {t('common.reset', lang)}
-          </button>
-        </div>
-
-        <button
-          type="button"
-          disabled={busy}
-          onClick={async () => {
-            setBusy(true)
-            try {
-              await onSave(config)
+            onClick={() => {
+              onSave(cfg)
               onClose()
-            } finally {
-              setBusy(false)
-            }
-          }}
-          className="w-full rounded-full border-2 border-ink bg-ink py-3 font-black text-paper disabled:opacity-50"
-        >
-          {busy ? '…' : t('common.save', lang)}
-        </button>
+            }}
+            className="bw-btn !bg-ink !text-paper"
+          >
+            {t('common.save', state.lang)}
+          </button>
+        </div>
       </div>
     </Modal>
   )

@@ -1,261 +1,282 @@
-/* Avatar constructor — paper-doll renderer in the app's neobrutalism style.
+import type { ReactElement } from 'react'
+
+/**
+ * Minimalist neobrutalism avatar generator.
  *
- * The avatar is encoded as a small JSON config. Each layer (bg / skin / hair /
- * eyes / mouth / accessory) is rendered as an inline SVG path with a thick
- * black stroke. The config can be persisted on the user record (`avatarSvg`)
- * and rendered without any image upload — fully client-side.
+ * Replaces the previous paper-doll faces with pure 2-color geometric tiles:
+ * - background: black or white
+ * - pattern overlay: dots / stripes / checker / chevron / grid / triangles /
+ *                    crosses / circles / diamonds / hex
+ * - rotation: 0/45/90/135 degrees
+ * - optional uppercase initial drawn over the pattern
+ *
+ * The whole thing is encoded as a small JSON config saved to user.avatar_svg
+ * and rendered client-side.
  */
 
+export const BG_COLORS = ['#ffffff', '#0a0a0a'] as const
+export type BgColor = (typeof BG_COLORS)[number]
+
+export const PATTERNS = [
+  'solid',
+  'dots',
+  'stripes',
+  'diag',
+  'checker',
+  'grid',
+  'chevron',
+  'triangles',
+  'cross',
+  'circles',
+  'diamonds',
+  'rings',
+] as const
+export type Pattern = (typeof PATTERNS)[number]
+
+export const ROTATIONS = [0, 45, 90, 135] as const
+export type Rotation = (typeof ROTATIONS)[number]
+
 export type AvatarConfig = {
-  bg: keyof typeof BG
-  skin: keyof typeof SKIN
-  head: (typeof HEAD)[number]
-  hair: (typeof HAIR)[number]
-  eyes: (typeof EYES)[number]
-  mouth: (typeof MOUTH)[number]
-  accessory: (typeof ACCESSORY)[number]
+  bg: BgColor
+  pattern: Pattern
+  rot: Rotation
+  /** Single uppercase letter drawn over the pattern. Empty hides the glyph. */
+  initial: string
 }
-
-export const BG = {
-  white: '#ffffff',
-  yellow: '#fde047',
-  cyan: '#67e8f9',
-  pink: '#fbcfe8',
-  lime: '#bef264',
-  lavender: '#c4b5fd',
-  peach: '#fed7aa',
-  mint: '#a7f3d0',
-}
-
-export const SKIN = {
-  light: '#fde7c8',
-  peach: '#f3c79e',
-  tan: '#d39468',
-  brown: '#9e6b3a',
-  dark: '#5a3a1f',
-  ghost: '#fafafa',
-}
-
-export const HEAD = ['round', 'oval', 'square', 'heart'] as const
-export const HAIR = ['bald', 'short', 'messy', 'pony', 'afro', 'mohawk', 'longCurly'] as const
-export const EYES = ['dot', 'oval', 'closed', 'glasses', 'wink', 'star'] as const
-export const MOUTH = ['smile', 'neutral', 'smirk', 'open', 'surprised', 'mustache'] as const
-export const ACCESSORY = ['none', 'hat', 'headband', 'earring', 'scarf'] as const
 
 export const DEFAULT_AVATAR: AvatarConfig = {
-  bg: 'yellow',
-  skin: 'light',
-  head: 'round',
-  hair: 'short',
-  eyes: 'dot',
-  mouth: 'smile',
-  accessory: 'none',
+  bg: '#ffffff',
+  pattern: 'dots',
+  rot: 0,
+  initial: '',
 }
 
-const STROKE = '#0a0a0a'
-const SW = 6
+export function encodeAvatarConfig(c: AvatarConfig): string {
+  return JSON.stringify(c)
+}
 
-function Head({ skin, shape }: { skin: string; shape: AvatarConfig['head'] }) {
-  switch (shape) {
-    case 'oval':
-      return <ellipse cx="100" cy="110" rx="48" ry="58" fill={skin} stroke={STROKE} strokeWidth={SW} />
-    case 'square':
-      return (
-        <rect x="50" y="58" width="100" height="104" rx="14" fill={skin} stroke={STROKE} strokeWidth={SW} />
-      )
-    case 'heart':
-      return (
-        <path
-          d="M100 168 C 40 130 38 80 70 70 C 88 64 96 80 100 92 C 104 80 112 64 130 70 C 162 80 160 130 100 168 Z"
-          fill={skin}
-          stroke={STROKE}
-          strokeWidth={SW}
-          strokeLinejoin="round"
-        />
-      )
-    case 'round':
-    default:
-      return <circle cx="100" cy="110" r="54" fill={skin} stroke={STROKE} strokeWidth={SW} />
+export function decodeAvatarConfig(s: string | null | undefined): AvatarConfig | null {
+  if (!s) return null
+  try {
+    const o = JSON.parse(s) as Partial<AvatarConfig>
+    if (!o || typeof o !== 'object') return null
+    const bg: BgColor = (BG_COLORS as readonly string[]).includes(o.bg ?? '')
+      ? (o.bg as BgColor)
+      : DEFAULT_AVATAR.bg
+    const pattern: Pattern = (PATTERNS as readonly string[]).includes(o.pattern ?? '')
+      ? (o.pattern as Pattern)
+      : DEFAULT_AVATAR.pattern
+    const rot: Rotation = (ROTATIONS as readonly number[]).includes(o.rot ?? -1)
+      ? (o.rot as Rotation)
+      : DEFAULT_AVATAR.rot
+    const initial = (o.initial ?? '').toString().trim().slice(0, 1).toUpperCase()
+    return { bg, pattern, rot, initial }
+  } catch {
+    return null
   }
 }
 
-function Hair({ kind }: { kind: AvatarConfig['hair'] }) {
-  switch (kind) {
-    case 'bald':
+const VIEW = 200
+
+function fg(bg: BgColor): string {
+  return bg === '#ffffff' ? '#0a0a0a' : '#ffffff'
+}
+
+type PatternProps = { color: string; bg: BgColor }
+
+function Dots({ color }: PatternProps) {
+  const dots: ReactElement[] = []
+  const step = 28
+  for (let y = step / 2; y < VIEW; y += step) {
+    for (let x = step / 2; x < VIEW; x += step) {
+      dots.push(<circle key={`${x}-${y}`} cx={x} cy={y} r={4.5} fill={color} />)
+    }
+  }
+  return <g>{dots}</g>
+}
+
+function Stripes({ color }: PatternProps) {
+  const lines: ReactElement[] = []
+  const w = 14
+  for (let y = 0; y < VIEW; y += w * 2) {
+    lines.push(<rect key={y} x={0} y={y} width={VIEW} height={w} fill={color} />)
+  }
+  return <g>{lines}</g>
+}
+
+function Diag({ color }: PatternProps) {
+  const lines: ReactElement[] = []
+  const w = 12
+  // diagonal lines via thick rotated rects
+  for (let i = -VIEW; i < VIEW * 2; i += w * 2) {
+    lines.push(
+      <rect
+        key={i}
+        x={i}
+        y={-VIEW}
+        width={w}
+        height={VIEW * 3}
+        fill={color}
+        transform={`rotate(45 ${VIEW / 2} ${VIEW / 2})`}
+      />,
+    )
+  }
+  return <g>{lines}</g>
+}
+
+function Checker({ color }: PatternProps) {
+  const cells: ReactElement[] = []
+  const n = 5
+  const s = VIEW / n
+  for (let y = 0; y < n; y++) {
+    for (let x = 0; x < n; x++) {
+      if ((x + y) % 2 === 0) {
+        cells.push(<rect key={`${x}-${y}`} x={x * s} y={y * s} width={s} height={s} fill={color} />)
+      }
+    }
+  }
+  return <g>{cells}</g>
+}
+
+function Grid({ color }: PatternProps) {
+  const lines: ReactElement[] = []
+  const step = 25
+  const t = 3
+  for (let v = step; v < VIEW; v += step) {
+    lines.push(<rect key={`h${v}`} x={0} y={v - t / 2} width={VIEW} height={t} fill={color} />)
+    lines.push(<rect key={`v${v}`} x={v - t / 2} y={0} width={t} height={VIEW} fill={color} />)
+  }
+  return <g>{lines}</g>
+}
+
+function Chevron({ color }: PatternProps) {
+  const w = 22
+  const items: ReactElement[] = []
+  let key = 0
+  for (let y = 0; y < VIEW + w; y += w) {
+    for (let x = -w; x < VIEW + w; x += w * 2) {
+      items.push(
+        <polygon
+          key={key++}
+          points={`${x},${y} ${x + w},${y - w / 2} ${x + 2 * w},${y} ${x + w},${y + w / 2}`}
+          fill={color}
+        />,
+      )
+    }
+  }
+  return <g>{items}</g>
+}
+
+function Triangles({ color }: PatternProps) {
+  const items: ReactElement[] = []
+  const s = 36
+  let key = 0
+  for (let y = 0; y < VIEW; y += s) {
+    for (let x = 0; x < VIEW; x += s) {
+      const flip = (x / s + y / s) % 2 === 0
+      items.push(
+        <polygon
+          key={key++}
+          points={
+            flip
+              ? `${x},${y} ${x + s},${y} ${x},${y + s}`
+              : `${x + s},${y} ${x + s},${y + s} ${x},${y + s}`
+          }
+          fill={color}
+        />,
+      )
+    }
+  }
+  return <g>{items}</g>
+}
+
+function Cross({ color }: PatternProps) {
+  const items: ReactElement[] = []
+  const step = 32
+  const t = 4
+  let key = 0
+  for (let y = step; y < VIEW; y += step) {
+    for (let x = step; x < VIEW; x += step) {
+      const len = 14
+      items.push(
+        <rect key={key++} x={x - len / 2} y={y - t / 2} width={len} height={t} fill={color} />,
+      )
+      items.push(
+        <rect key={key++} x={x - t / 2} y={y - len / 2} width={t} height={len} fill={color} />,
+      )
+    }
+  }
+  return <g>{items}</g>
+}
+
+function Circles({ color }: PatternProps) {
+  const items: ReactElement[] = []
+  const step = 32
+  let key = 0
+  for (let y = step / 2; y < VIEW; y += step) {
+    for (let x = step / 2; x < VIEW; x += step) {
+      items.push(
+        <circle key={key++} cx={x} cy={y} r={11} fill="none" stroke={color} strokeWidth={3} />,
+      )
+    }
+  }
+  return <g>{items}</g>
+}
+
+function Diamonds({ color }: PatternProps) {
+  const items: ReactElement[] = []
+  const step = 36
+  let key = 0
+  for (let y = step / 2; y < VIEW + step; y += step) {
+    for (let x = step / 2; x < VIEW + step; x += step) {
+      items.push(
+        <polygon
+          key={key++}
+          points={`${x},${y - 9} ${x + 9},${y} ${x},${y + 9} ${x - 9},${y}`}
+          fill={color}
+        />,
+      )
+    }
+  }
+  return <g>{items}</g>
+}
+
+function Rings({ color }: PatternProps) {
+  return (
+    <g fill="none" stroke={color} strokeWidth={6}>
+      <circle cx={VIEW / 2} cy={VIEW / 2} r={36} />
+      <circle cx={VIEW / 2} cy={VIEW / 2} r={64} />
+      <circle cx={VIEW / 2} cy={VIEW / 2} r={92} />
+    </g>
+  )
+}
+
+function PatternLayer({ pattern, color, bg }: { pattern: Pattern } & PatternProps) {
+  switch (pattern) {
+    case 'solid':
       return null
-    case 'short':
-      return (
-        <path
-          d="M52 88 C 56 50 144 50 148 88 L 142 76 L 130 84 L 120 70 L 108 82 L 96 70 L 84 82 L 72 70 L 60 84 L 52 88 Z"
-          fill={STROKE}
-          stroke={STROKE}
-          strokeWidth={SW}
-          strokeLinejoin="round"
-        />
-      )
-    case 'messy':
-      return (
-        <path
-          d="M48 70 L 60 50 L 72 70 L 84 46 L 96 70 L 108 44 L 120 70 L 132 50 L 144 70 L 152 92 L 48 92 Z"
-          fill={STROKE}
-          stroke={STROKE}
-          strokeWidth={SW}
-          strokeLinejoin="round"
-        />
-      )
-    case 'pony':
-      return (
-        <>
-          <path d="M52 86 C 56 50 144 50 148 86 L 50 90 Z" fill={STROKE} stroke={STROKE} strokeWidth={SW} strokeLinejoin="round" />
-          <path d="M150 92 C 178 100 184 150 156 168" fill="none" stroke={STROKE} strokeWidth={SW * 1.4} strokeLinecap="round" />
-        </>
-      )
-    case 'afro':
-      return (
-        <circle cx="100" cy="68" r="50" fill={STROKE} stroke={STROKE} strokeWidth={SW} />
-      )
-    case 'mohawk':
-      return (
-        <path
-          d="M86 90 L 92 30 L 100 60 L 108 30 L 114 90 Z"
-          fill={STROKE}
-          stroke={STROKE}
-          strokeWidth={SW}
-          strokeLinejoin="round"
-        />
-      )
-    case 'longCurly':
-      return (
-        <path
-          d="M40 80 C 40 40 160 40 160 80 C 168 110 164 150 156 178 L 138 168 L 138 130 C 130 100 70 100 62 130 L 62 168 L 44 178 C 36 150 32 110 40 80 Z"
-          fill={STROKE}
-          stroke={STROKE}
-          strokeWidth={SW}
-          strokeLinejoin="round"
-        />
-      )
-  }
-}
-
-function Eyes({ kind }: { kind: AvatarConfig['eyes'] }) {
-  switch (kind) {
-    case 'oval':
-      return (
-        <>
-          <ellipse cx="80" cy="108" rx="7" ry="9" fill={STROKE} />
-          <ellipse cx="120" cy="108" rx="7" ry="9" fill={STROKE} />
-        </>
-      )
-    case 'closed':
-      return (
-        <>
-          <path d="M70 108 Q 80 116 90 108" stroke={STROKE} strokeWidth={SW} fill="none" strokeLinecap="round" />
-          <path d="M110 108 Q 120 116 130 108" stroke={STROKE} strokeWidth={SW} fill="none" strokeLinecap="round" />
-        </>
-      )
-    case 'glasses':
-      return (
-        <>
-          <circle cx="80" cy="110" r="14" fill="none" stroke={STROKE} strokeWidth={SW} />
-          <circle cx="120" cy="110" r="14" fill="none" stroke={STROKE} strokeWidth={SW} />
-          <line x1="94" y1="110" x2="106" y2="110" stroke={STROKE} strokeWidth={SW} />
-          <circle cx="80" cy="110" r="3" fill={STROKE} />
-          <circle cx="120" cy="110" r="3" fill={STROKE} />
-        </>
-      )
-    case 'wink':
-      return (
-        <>
-          <circle cx="80" cy="108" r="5" fill={STROKE} />
-          <path d="M110 108 Q 120 116 130 108" stroke={STROKE} strokeWidth={SW} fill="none" strokeLinecap="round" />
-        </>
-      )
-    case 'star':
-      return (
-        <>
-          <Star cx={80} cy={108} />
-          <Star cx={120} cy={108} />
-        </>
-      )
-    case 'dot':
-    default:
-      return (
-        <>
-          <circle cx="80" cy="108" r="5" fill={STROKE} />
-          <circle cx="120" cy="108" r="5" fill={STROKE} />
-        </>
-      )
-  }
-}
-
-function Star({ cx, cy }: { cx: number; cy: number }) {
-  const r = 8
-  const pts: string[] = []
-  for (let i = 0; i < 10; i++) {
-    const a = (Math.PI / 5) * i - Math.PI / 2
-    const rad = i % 2 === 0 ? r : r / 2.4
-    pts.push(`${cx + rad * Math.cos(a)},${cy + rad * Math.sin(a)}`)
-  }
-  return <polygon points={pts.join(' ')} fill={STROKE} />
-}
-
-function Mouth({ kind }: { kind: AvatarConfig['mouth'] }) {
-  switch (kind) {
-    case 'neutral':
-      return <line x1="84" y1="138" x2="116" y2="138" stroke={STROKE} strokeWidth={SW} strokeLinecap="round" />
-    case 'smirk':
-      return <path d="M84 138 Q 100 144 116 132" stroke={STROKE} strokeWidth={SW} fill="none" strokeLinecap="round" />
-    case 'open':
-      return <ellipse cx="100" cy="140" rx="14" ry="10" fill={STROKE} />
-    case 'surprised':
-      return <circle cx="100" cy="140" r="8" fill={STROKE} />
-    case 'mustache':
-      return (
-        <>
-          <path d="M76 132 Q 88 140 100 134 Q 112 140 124 132" stroke={STROKE} strokeWidth={SW * 1.4} fill="none" strokeLinecap="round" />
-          <path d="M86 142 Q 100 148 114 142" stroke={STROKE} strokeWidth={SW} fill="none" strokeLinecap="round" />
-        </>
-      )
-    case 'smile':
-    default:
-      return <path d="M82 134 Q 100 152 118 134" stroke={STROKE} strokeWidth={SW} fill="none" strokeLinecap="round" />
-  }
-}
-
-function Accessory({ kind }: { kind: AvatarConfig['accessory'] }) {
-  switch (kind) {
-    case 'hat':
-      return (
-        <path
-          d="M40 78 L 60 30 L 140 30 L 160 78 Z"
-          fill={STROKE}
-          stroke={STROKE}
-          strokeWidth={SW}
-          strokeLinejoin="round"
-        />
-      )
-    case 'headband':
-      return (
-        <rect x="46" y="78" width="108" height="14" fill="#ef4444" stroke={STROKE} strokeWidth={SW} />
-      )
-    case 'earring':
-      return (
-        <>
-          <circle cx="48" cy="128" r="6" fill="#fbbf24" stroke={STROKE} strokeWidth={SW * 0.6} />
-          <circle cx="152" cy="128" r="6" fill="#fbbf24" stroke={STROKE} strokeWidth={SW * 0.6} />
-        </>
-      )
-    case 'scarf':
-      return (
-        <path
-          d="M50 168 L 50 188 L 150 188 L 150 168 C 130 178 70 178 50 168 Z"
-          fill="#ef4444"
-          stroke={STROKE}
-          strokeWidth={SW}
-          strokeLinejoin="round"
-        />
-      )
-    case 'none':
+    case 'dots':
+      return <Dots color={color} bg={bg} />
+    case 'stripes':
+      return <Stripes color={color} bg={bg} />
+    case 'diag':
+      return <Diag color={color} bg={bg} />
+    case 'checker':
+      return <Checker color={color} bg={bg} />
+    case 'grid':
+      return <Grid color={color} bg={bg} />
+    case 'chevron':
+      return <Chevron color={color} bg={bg} />
+    case 'triangles':
+      return <Triangles color={color} bg={bg} />
+    case 'cross':
+      return <Cross color={color} bg={bg} />
+    case 'circles':
+      return <Circles color={color} bg={bg} />
+    case 'diamonds':
+      return <Diamonds color={color} bg={bg} />
+    case 'rings':
+      return <Rings color={color} bg={bg} />
     default:
       return null
   }
@@ -264,62 +285,50 @@ function Accessory({ kind }: { kind: AvatarConfig['accessory'] }) {
 export function AvatarSVG({
   config = DEFAULT_AVATAR,
   size = 96,
-  rounded = true,
+  rounded = false,
 }: {
-  config?: AvatarConfig | null
+  config?: AvatarConfig
   size?: number
   rounded?: boolean
 }) {
-  const c = config ?? DEFAULT_AVATAR
-  const bg = BG[c.bg] ?? BG.white
-  const skin = SKIN[c.skin] ?? SKIN.light
+  const { bg, pattern, rot, initial } = config
+  const color = fg(bg)
   return (
     <svg
-      viewBox="0 0 200 200"
       width={size}
       height={size}
-      className={
-        rounded
-          ? 'flex-shrink-0 rounded-full border-2 border-black bg-paper'
-          : 'flex-shrink-0 border-2 border-black bg-paper'
-      }
-      style={{ width: size, height: size }}
+      viewBox={`0 0 ${VIEW} ${VIEW}`}
+      xmlns="http://www.w3.org/2000/svg"
+      style={{
+        display: 'block',
+        borderRadius: rounded ? size / 2 : 0,
+        border: '2px solid #000',
+        background: bg,
+      }}
     >
-      <rect x="0" y="0" width="200" height="200" fill={bg} />
-      <Head skin={skin} shape={c.head} />
-      <Hair kind={c.hair} />
-      <Eyes kind={c.eyes} />
-      <Mouth kind={c.mouth} />
-      <Accessory kind={c.accessory} />
+      <g transform={`rotate(${rot} ${VIEW / 2} ${VIEW / 2})`}>
+        <PatternLayer pattern={pattern} color={color} bg={bg} />
+      </g>
+      {initial && (
+        <text
+          x={VIEW / 2}
+          y={VIEW / 2}
+          textAnchor="middle"
+          dominantBaseline="central"
+          fontFamily="Inter, ui-sans-serif, system-ui, -apple-system, sans-serif"
+          fontWeight={900}
+          fontSize={120}
+          fill={color}
+          style={{
+            paintOrder: 'stroke',
+            stroke: bg,
+            strokeWidth: 18,
+            strokeLinejoin: 'round',
+          }}
+        >
+          {initial}
+        </text>
+      )}
     </svg>
   )
-}
-
-/** Serialize an AvatarConfig to a compact string suitable for storage. */
-export function encodeAvatarConfig(c: AvatarConfig): string {
-  return JSON.stringify(c)
-}
-
-/** Parse a stored config back into an AvatarConfig, or null on bad input. */
-export function decodeAvatarConfig(s: string | null | undefined): AvatarConfig | null {
-  if (!s) return null
-  try {
-    const parsed = JSON.parse(s) as Partial<AvatarConfig>
-    if (
-      parsed &&
-      typeof parsed === 'object' &&
-      typeof parsed.bg === 'string' &&
-      typeof parsed.skin === 'string' &&
-      typeof parsed.head === 'string' &&
-      typeof parsed.hair === 'string' &&
-      typeof parsed.eyes === 'string' &&
-      typeof parsed.mouth === 'string' &&
-      typeof parsed.accessory === 'string'
-    ) {
-      return parsed as AvatarConfig
-    }
-  } catch {
-    /* fall through */
-  }
-  return null
 }

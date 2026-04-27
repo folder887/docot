@@ -889,6 +889,7 @@ function EditProfileSection() {
       <AvatarBuilder
         open={builderOpen}
         initial={decodeAvatarConfig(avatarSvg)}
+        defaultLetter={(name || '').slice(0, 1).toUpperCase()}
         onClose={() => setBuilderOpen(false)}
         onSave={(cfg) => {
           setAvatarSvg(encodeAvatarConfig(cfg))
