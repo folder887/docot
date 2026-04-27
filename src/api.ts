@@ -1,4 +1,4 @@
-const DEFAULT_API = 'https://docot-backend-wvkjcktl.fly.dev'
+const DEFAULT_API = 'https://docot-backend-ryhccesj.fly.dev'
 export const API_URL: string = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') || DEFAULT_API
 
 const TOKEN_KEY = 'docot:token'
