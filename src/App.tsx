@@ -30,17 +30,55 @@ function ThemeSync() {
   const { state } = useApp()
   useEffect(() => {
     const root = document.documentElement
-    root.setAttribute('data-theme', state.prefs.theme)
+    const prefersDark =
+      typeof window !== 'undefined' &&
+      window.matchMedia &&
+      window.matchMedia('(prefers-color-scheme: dark)').matches
+    const effectiveTheme = state.prefs.autoNight
+      ? prefersDark
+        ? 'dark'
+        : 'light'
+      : state.prefs.theme
+    root.setAttribute('data-theme', effectiveTheme)
     root.setAttribute('data-wallpaper', state.prefs.wallpaper)
+    root.setAttribute('data-font', state.prefs.fontSize)
     const motionOff = !state.prefs.animations || state.prefs.reduceMotion
     root.setAttribute('data-motion', motionOff ? 'off' : 'on')
     const meta = document.querySelector('meta[name="theme-color"]')
     if (meta) {
       const color =
-        state.prefs.theme === 'dark' ? '#0b0b0b' : state.prefs.theme === 'paper' ? '#f5f1e8' : state.prefs.theme === 'inverse' ? '#000000' : '#ffffff'
+        effectiveTheme === 'dark'
+          ? '#0b0b0b'
+          : effectiveTheme === 'paper'
+            ? '#f5f1e8'
+            : effectiveTheme === 'inverse'
+              ? '#000000'
+              : '#ffffff'
       meta.setAttribute('content', color)
     }
-  }, [state.prefs.theme, state.prefs.wallpaper, state.prefs.animations, state.prefs.reduceMotion])
+  }, [
+    state.prefs.theme,
+    state.prefs.wallpaper,
+    state.prefs.animations,
+    state.prefs.reduceMotion,
+    state.prefs.fontSize,
+    state.prefs.autoNight,
+  ])
+
+  // Listen for OS theme changes when autoNight is on so the UI flips
+  // immediately without waiting for the next prefs change.
+  useEffect(() => {
+    if (!state.prefs.autoNight) return
+    const mql = window.matchMedia('(prefers-color-scheme: dark)')
+    const onChange = () => {
+      document.documentElement.setAttribute(
+        'data-theme',
+        mql.matches ? 'dark' : 'light',
+      )
+    }
+    mql.addEventListener('change', onChange)
+    return () => mql.removeEventListener('change', onChange)
+  }, [state.prefs.autoNight])
   return null
 }
 

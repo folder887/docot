@@ -346,6 +346,36 @@ function ChatSection() {
         />
       ))}
 
+      <SectionHeader text={t('settings.text', lang)} />
+      <div className="border-b border-line px-4 py-3">
+        <div className="font-bold">{t('settings.fontSize', lang)}</div>
+        <div className="mt-2 flex gap-2">
+          {(['sm', 'md', 'lg'] as const).map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => setPrefs({ fontSize: s })}
+              className={`flex-1 rounded-full border-2 border-ink px-3 py-2 font-bold ${
+                state.prefs.fontSize === s ? 'bg-ink text-paper' : 'bg-paper text-ink'
+              } ${s === 'sm' ? 'text-xs' : s === 'lg' ? 'text-base' : 'text-sm'}`}
+            >
+              {t(`settings.fontSize.${s}`, lang)}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <Toggle
+        label={t('settings.autoNight', lang)}
+        hint={
+          lang === 'ru'
+            ? 'Тёмная тема включится автоматически по системной'
+            : 'Switch to dark theme automatically when the OS prefers it'
+        }
+        value={state.prefs.autoNight}
+        onChange={(v) => setPrefs({ autoNight: v })}
+      />
+
       <SectionHeader text="Chat list" />
       <Toggle label={t('settings.compact', lang)} value={state.prefs.compactMode} onChange={(v) => setPrefs({ compactMode: v })} />
     </div>

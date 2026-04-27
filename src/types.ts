@@ -2,6 +2,8 @@ export type Lang = 'en' | 'ru'
 export type Theme = 'light' | 'dark' | 'paper' | 'inverse'
 export type Wallpaper = 'none' | 'dots' | 'grid' | 'noise' | 'ink' | 'lines' | 'waves'
 
+export type FontSize = 'sm' | 'md' | 'lg'
+
 export type Prefs = {
   theme: Theme
   wallpaper: Wallpaper
@@ -14,6 +16,9 @@ export type Prefs = {
   twoStep: boolean
   passcode: boolean
   compactMode: boolean
+  fontSize: FontSize
+  /** When true, follow the OS dark/light preference and override `theme`. */
+  autoNight: boolean
 }
 
 export type User = {
@@ -174,4 +179,6 @@ export const defaultPrefs: Prefs = {
   twoStep: false,
   passcode: false,
   compactMode: false,
+  fontSize: 'md',
+  autoNight: false,
 }
