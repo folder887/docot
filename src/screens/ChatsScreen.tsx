@@ -91,7 +91,7 @@ export function ChatsScreen() {
       window.clearTimeout(startSearch)
       window.clearTimeout(h)
     }
-  }, [query, searchUsers, state.me?.id, state.chats])
+  }, [query, searchUsers, state.me?.id])
 
   const visible = useMemo(() => {
     const filtered = applySystemFolder(state.chats, folder, state.folders, userKindOfPeer)

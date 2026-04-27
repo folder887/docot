@@ -265,7 +265,7 @@ def delete_account(
     given = body.handle.strip().lstrip("@").lower()
     if not given or given != expected:
         raise HTTPException(status_code=400, detail="Handle does not match")
-    me.handle = f"deleted_{me.id[:8]}"
+    me.handle = f"deleted_{me.id}"
     me.name = "Deleted user"
     me.password_hash = ""
     me.bio = ""
