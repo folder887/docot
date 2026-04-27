@@ -84,7 +84,18 @@ type Ctx = {
   applyMessageDelete: (chatId: string, messageId: string, deletedAt: number) => void
   applyMessagePin: (chatId: string, messageId: string, pinned: boolean, pinnedAt: number | null) => void
   createChat: (participantIds: string[], kind?: Chat['kind'], title?: string) => Promise<string>
-  patchChat: (chatId: string, patch: { title?: string; description?: string; isPublic?: boolean }) => Promise<void>
+  patchChat: (
+    chatId: string,
+    patch: {
+      title?: string
+      description?: string
+      isPublic?: boolean
+      slowModeSeconds?: number
+      subscribersOnly?: boolean
+      signedPosts?: boolean
+      autoDeleteSeconds?: number
+    },
+  ) => Promise<void>
   pinChat: (chatId: string, pinned: boolean) => Promise<void>
   muteChat: (chatId: string, muted: boolean) => Promise<void>
   deleteChat: (chatId: string) => Promise<void>
@@ -316,6 +327,7 @@ function chatFromApi(c: ApiChat, meId?: string): Chat {
     slowModeSeconds: c.slowModeSeconds ?? 0,
     subscribersOnly: !!c.subscribersOnly,
     signedPosts: !!c.signedPosts,
+    autoDeleteSeconds: c.autoDeleteSeconds ?? 0,
     createdBy: c.createdBy,
     participants: c.participants,
     messages: c.messages.map((m) => fixSealed(msgFromApi(m))),
@@ -876,7 +888,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const patchChat = useCallback(
     async (
       chatId: string,
-      patch: { title?: string; description?: string; isPublic?: boolean },
+      patch: {
+        title?: string
+        description?: string
+        isPublic?: boolean
+        slowModeSeconds?: number
+        subscribersOnly?: boolean
+        signedPosts?: boolean
+        autoDeleteSeconds?: number
+      },
     ) => {
       const updated = chatFromApi(await api.patchChat(chatId, patch), state.me?.id)
       setState((s) => ({

@@ -75,6 +75,7 @@ export type Chat = {
   slowModeSeconds?: number
   subscribersOnly?: boolean
   signedPosts?: boolean
+  autoDeleteSeconds?: number
   createdBy?: string
   participants: string[]
   messages: Message[]

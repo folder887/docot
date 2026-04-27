@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import inspect, text
 
 from .config import get_settings
-from .db import Base, engine
+from .db import Base, SessionLocal, engine
+from .models import Chat, Message, now_ms
 from .routers import (
     auth,
     chats,
@@ -33,6 +36,7 @@ _MIGRATIONS: list[tuple[str, str, str]] = [
     ("chats", "slow_mode_seconds", "INTEGER NOT NULL DEFAULT 0"),
     ("chats", "subscribers_only", "INTEGER NOT NULL DEFAULT 0"),
     ("chats", "signed_posts", "INTEGER NOT NULL DEFAULT 0"),
+    ("chats", "auto_delete_seconds", "INTEGER NOT NULL DEFAULT 0"),
     ("messages", "edited_at", "INTEGER"),
     ("messages", "deleted_at", "INTEGER"),
     ("messages", "reply_to_id", "VARCHAR"),
@@ -90,13 +94,72 @@ def _migrate_signal_to_multi_device() -> None:
         conn.execute(text("DROP TABLE IF EXISTS user_keys"))
 
 
+def _purge_expired_messages_once() -> int:
+    """Tomb-stone messages older than each chat's auto_delete_seconds.
+
+    Sealed (E2E) ciphertext is replaced with empty text and `deleted_at` is
+    stamped, mirroring the user-initiated delete path. Returns the number
+    of messages purged. Errors are logged and suppressed so a transient
+    DB issue can't crash the whole worker.
+    """
+    purged = 0
+    try:
+        db = SessionLocal()
+        try:
+            chats = db.query(Chat).filter(Chat.auto_delete_seconds > 0).all()
+            now = now_ms()
+            for chat in chats:
+                ttl_ms = int(chat.auto_delete_seconds) * 1000
+                cutoff = now - ttl_ms
+                rows = (
+                    db.query(Message)
+                    .filter(
+                        Message.chat_id == chat.id,
+                        Message.created_at < cutoff,
+                        Message.deleted_at.is_(None),
+                    )
+                    .all()
+                )
+                for m in rows:
+                    m.text = ""
+                    m.deleted_at = now
+                purged += len(rows)
+            if purged:
+                db.commit()
+        finally:
+            db.close()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("auto-delete purge failed: %s", exc)
+    return purged
+
+
+async def _purge_loop() -> None:
+    """Run `_purge_expired_messages_once` every 60s for the lifetime of the app."""
+    while True:
+        await asyncio.sleep(60)
+        await asyncio.to_thread(_purge_expired_messages_once)
+
+
+@asynccontextmanager
+async def _lifespan(_: FastAPI):
+    task = asyncio.create_task(_purge_loop())
+    try:
+        yield
+    finally:
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            pass
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
     _migrate_signal_to_multi_device()
     Base.metadata.create_all(bind=engine)
     _apply_migrations()
 
-    app = FastAPI(title="docot", version="1.0.0")
+    app = FastAPI(title="docot", version="1.0.0", lifespan=_lifespan)
     origins = [o.strip() for o in settings.cors_origins.split(",") if o.strip()]
     app.add_middleware(
         CORSMiddleware,

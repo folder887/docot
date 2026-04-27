@@ -124,6 +124,7 @@ class ChatOut(BaseModel):
     slowModeSeconds: int = 0
     subscribersOnly: bool = False
     signedPosts: bool = False
+    autoDeleteSeconds: int = 0
     createdBy: str | None = None
     participants: list[str]
     pinned: bool = False
@@ -149,6 +150,7 @@ class ChatPatch(BaseModel):
     slowModeSeconds: int | None = Field(default=None, ge=0, le=3600)
     subscribersOnly: bool | None = None
     signedPosts: bool | None = None
+    autoDeleteSeconds: int | None = Field(default=None, ge=0, le=60 * 60 * 24 * 365)
 
 
 class ChatMemberOut(BaseModel):

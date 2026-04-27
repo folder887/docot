@@ -22,6 +22,7 @@ import { TabBar, DesktopSidebar } from './components/TabBar'
 import { TopBar } from './components/TopBar'
 import { ToastHost } from './components/Toast'
 import { PasscodeLockGate } from './components/PasscodeLockGate'
+import { ReleaseBanner } from './components/ReleaseBanner'
 
 const TOP_TAB_ROUTES = ['/chats', '/calendar', '/notes', '/news', '/menu']
 
@@ -82,6 +83,7 @@ function Shell() {
         </div>
       </main>
       {!hideChrome && <TabBar />}
+      {!hideChrome && <ReleaseBanner />}
     </div>
   )
 }

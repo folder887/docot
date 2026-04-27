@@ -88,6 +88,42 @@ body,
   overscroll-behavior-y: none;
 }
 
+/* Safe-area insets exposed as CSS variables. Components that anchor to the
+ * top or bottom edges (mobile top bar, bottom tab bar, action sheets) must
+ * read these to avoid sliding under the iOS notch / Android navigation bar.
+ * Fallback to 0 keeps desktop unchanged. */
+:root {
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+}
+
+/* Tap-target hardening for mobile. Apple HIG / Material both ask for 44px
+ * minimum hit area; previously several icon-only buttons were ~32px which
+ * made them unreliable on touch. We bump every <button> on coarse pointers
+ * unless it explicitly opts out via `data-tap="auto"`. */
+@media (pointer: coarse) {
+  button:not([data-tap='auto']),
+  [role='button']:not([data-tap='auto']),
+  a.row-press,
+  .bw-btn,
+  .bw-btn-primary,
+  .bw-btn-ghost {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  /* Push the bottom tab bar above the system gesture area on iOS / Android. */
+  nav.tabbar-bottom {
+    padding-bottom: var(--sab);
+  }
+  /* Top bar respects the notch / camera cutout. */
+  .topbar-mobile,
+  .chats-pane-header {
+    padding-top: var(--sat);
+  }
+}
+
 /*
  * Emoji rendering: prefer the platform's native colour-emoji font in a fixed
  * priority order. macOS / iOS users get the Apple set natively (the closest

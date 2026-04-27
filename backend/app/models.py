@@ -72,6 +72,9 @@ class Chat(Base):
     slow_mode_seconds: Mapped[int] = mapped_column(Integer, default=0)
     subscribers_only: Mapped[bool] = mapped_column(Boolean, default=False)
     signed_posts: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Per-chat retention. Messages older than this are tomb-stoned by the
+    # `purge_expired_messages` background task. 0 disables auto-delete.
+    auto_delete_seconds: Mapped[int] = mapped_column(Integer, default=0)
     created_by: Mapped[str] = mapped_column(String, ForeignKey("users.id"))
     created_at: Mapped[int] = mapped_column(Integer, default=now_ms)
     updated_at: Mapped[int] = mapped_column(Integer, default=now_ms)

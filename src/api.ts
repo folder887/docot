@@ -114,6 +114,7 @@ export type ApiChat = {
   slowModeSeconds?: number
   subscribersOnly?: boolean
   signedPosts?: boolean
+  autoDeleteSeconds?: number
   createdBy?: string
   participants: string[]
   pinned: boolean
@@ -310,6 +311,7 @@ export const api = {
       slowModeSeconds?: number
       subscribersOnly?: boolean
       signedPosts?: boolean
+      autoDeleteSeconds?: number
     },
   ) =>
     request<ApiChat>(`/chats/${encodeURIComponent(chatId)}`, {

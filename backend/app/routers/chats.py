@@ -122,6 +122,7 @@ def _chat_out(db: Session, chat: Chat, me_id: str, with_history: bool = False) -
         slowModeSeconds=int(getattr(chat, "slow_mode_seconds", 0) or 0),
         subscribersOnly=bool(getattr(chat, "subscribers_only", False)),
         signedPosts=bool(getattr(chat, "signed_posts", False)),
+        autoDeleteSeconds=int(getattr(chat, "auto_delete_seconds", 0) or 0),
         createdBy=chat.created_by,
         participants=members,
         pinned=bool(membership and membership.pinned),
@@ -628,6 +629,8 @@ def update_chat(
         chat.subscribers_only = bool(body.subscribersOnly)
     if body.signedPosts is not None:
         chat.signed_posts = bool(body.signedPosts)
+    if body.autoDeleteSeconds is not None:
+        chat.auto_delete_seconds = int(body.autoDeleteSeconds)
     chat.updated_at = now_ms()
     db.commit()
     db.refresh(chat)
