@@ -52,6 +52,10 @@ def current_user(
     user = db.get(User, uid)
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    # Soft-deleted accounts (delete_account clears password_hash) must be
+    # rejected immediately so existing JWTs cannot resurrect the user.
+    if not user.password_hash:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Account deleted")
     # best-effort last-seen tick; don't block request on commit failure
     try:
         user.last_seen_at = int(time.time() * 1000)

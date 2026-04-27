@@ -21,7 +21,11 @@ def _viewer_in_target_contacts(db: Session, viewer_id: str, target_id: str) -> b
     """
     return (
         db.query(Contact.id)
-        .filter(Contact.owner_id == target_id, Contact.contact_id == viewer_id)
+        .filter(
+            Contact.owner_id == target_id,
+            Contact.contact_id == viewer_id,
+            Contact.blocked.is_(False),
+        )
         .first()
         is not None
     )
@@ -34,7 +38,11 @@ def _viewers_in_targets_contacts(
         return set()
     rows = (
         db.query(Contact.owner_id)
-        .filter(Contact.contact_id == viewer_id, Contact.owner_id.in_(target_ids))
+        .filter(
+            Contact.contact_id == viewer_id,
+            Contact.owner_id.in_(target_ids),
+            Contact.blocked.is_(False),
+        )
         .all()
     )
     return {r[0] for r in rows}
