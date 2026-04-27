@@ -116,9 +116,19 @@ export function ChatComposer({
     }
   })
 
-  // Persist outgoing text per chat. Cleared after send/cancel-edit.
+  // Persist outgoing text per chat. Skip the first run after `draftKey` flips
+  // — the current `text` still belongs to the previous chat at that point and
+  // would otherwise overwrite the destination chat's draft.
+  const prevDraftKeyRef = useRef(draftKey)
   useEffect(() => {
-    if (!draftKey) return
+    if (!draftKey) {
+      prevDraftKeyRef.current = draftKey
+      return
+    }
+    if (prevDraftKeyRef.current !== draftKey) {
+      prevDraftKeyRef.current = draftKey
+      return
+    }
     try {
       if (text) localStorage.setItem(draftKey, text)
       else localStorage.removeItem(draftKey)

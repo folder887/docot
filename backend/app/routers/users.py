@@ -13,11 +13,39 @@ from ..schemas import UserOut, UserUpdateIn
 router = APIRouter(prefix="/users", tags=["users"])
 
 
+def _viewer_in_target_contacts(db: Session, viewer_id: str, target_id: str) -> bool:
+    """Return True iff the *target* user has the viewer in their contact list.
+
+    Presence privacy `contacts` is asymmetric: A's lastSeen is visible only to
+    people that *A* has added as contacts (not to people who have added A).
+    """
+    return (
+        db.query(Contact.id)
+        .filter(Contact.owner_id == target_id, Contact.contact_id == viewer_id)
+        .first()
+        is not None
+    )
+
+
+def _viewers_in_targets_contacts(
+    db: Session, viewer_id: str, target_ids: list[str]
+) -> set[str]:
+    if not target_ids:
+        return set()
+    rows = (
+        db.query(Contact.owner_id)
+        .filter(Contact.contact_id == viewer_id, Contact.owner_id.in_(target_ids))
+        .all()
+    )
+    return {r[0] for r in rows}
+
+
 def _out(
     u: User,
     me_contacts: dict[str, Contact] | None = None,
     *,
     is_self: bool = False,
+    viewer_in_target_contacts: bool = False,
 ) -> UserOut:
     info = me_contacts.get(u.id) if me_contacts else None
     raw_links = (getattr(u, "links", "") or "").split("\n")
@@ -26,13 +54,14 @@ def _out(
     avatar_svg = getattr(u, "avatar_svg", "") or None
     status = getattr(u, "status", "") or None
     presence = getattr(u, "presence", "everyone") or "everyone"
-    # Honour presence privacy. The user themselves and their contacts always
-    # see lastSeen; everyone else may be filtered depending on the setting.
+    # Honour presence privacy. `contacts` means "only people I've added see
+    # my lastSeen" — i.e. the *target* must have the viewer in their contacts,
+    # not the other way around (that's `info`, viewer's view of target).
     last_seen: int | None = u.last_seen_at
     if not is_self:
         if presence == "nobody":
             last_seen = None
-        elif presence == "contacts" and not info:
+        elif presence == "contacts" and not viewer_in_target_contacts:
             last_seen = None
     return UserOut(
         id=u.id,
@@ -84,7 +113,8 @@ def search(
         c.contact_id: c
         for c in db.query(Contact).filter(Contact.owner_id == me.id).all()
     }
-    return [_out(u, contacts) for u in rows]
+    visible = _viewers_in_targets_contacts(db, me.id, [u.id for u in rows])
+    return [_out(u, contacts, viewer_in_target_contacts=u.id in visible) for u in rows]
 
 
 @router.get("/{user_id}", response_model=UserOut)
@@ -103,7 +133,13 @@ def get_user(
         .filter(Contact.owner_id == me.id, Contact.contact_id == u.id)
         .first()
     )
-    return _out(u, {u.id: c} if c else None, is_self=u.id == me.id)
+    return _out(
+        u,
+        {u.id: c} if c else None,
+        is_self=u.id == me.id,
+        viewer_in_target_contacts=u.id != me.id
+        and _viewer_in_target_contacts(db, me.id, u.id),
+    )
 
 
 @router.patch("/me", response_model=UserOut)
@@ -166,7 +202,11 @@ def add_contact(
         db.add(contact)
     db.commit()
     db.refresh(contact)
-    return _out(target, {target.id: contact})
+    return _out(
+        target,
+        {target.id: contact},
+        viewer_in_target_contacts=_viewer_in_target_contacts(db, me.id, target.id),
+    )
 
 
 @router.delete("/{user_id}/contact", response_model=UserOut)
@@ -182,7 +222,10 @@ def remove_contact(
         Contact.owner_id == me.id, Contact.contact_id == target.id
     ).delete()
     db.commit()
-    return _out(target)
+    return _out(
+        target,
+        viewer_in_target_contacts=_viewer_in_target_contacts(db, me.id, target.id),
+    )
 
 
 @router.post("/{user_id}/block", response_model=UserOut)
@@ -206,7 +249,11 @@ def block(
         c.blocked = True
     db.commit()
     db.refresh(c)
-    return _out(target, {target.id: c})
+    return _out(
+        target,
+        {target.id: c},
+        viewer_in_target_contacts=_viewer_in_target_contacts(db, me.id, target.id),
+    )
 
 
 @router.post("/{user_id}/unblock", response_model=UserOut)
@@ -226,7 +273,11 @@ def unblock(
     if c:
         c.blocked = False
         db.commit()
-    return _out(target, {target.id: c} if c else None)
+    return _out(
+        target,
+        {target.id: c} if c else None,
+        viewer_in_target_contacts=_viewer_in_target_contacts(db, me.id, target.id),
+    )
 
 
 @router.get("/me/blocked", response_model=list[UserOut])
@@ -240,7 +291,11 @@ def list_blocked(
         .filter(Contact.owner_id == me.id, Contact.blocked.is_(True))
         .all()
     )
-    return [_out(u, {u.id: c}) for c, u in rows]
+    visible = _viewers_in_targets_contacts(db, me.id, [u.id for _, u in rows])
+    return [
+        _out(u, {u.id: c}, viewer_in_target_contacts=u.id in visible)
+        for c, u in rows
+    ]
 
 
 class _DeleteAccountIn(BaseModel):
@@ -289,7 +344,11 @@ def list_contacts(
         .filter(Contact.owner_id == me.id)
         .all()
     )
-    return [_out(u, {u.id: c}) for c, u in rows]
+    visible = _viewers_in_targets_contacts(db, me.id, [u.id for _, u in rows])
+    return [
+        _out(u, {u.id: c}, viewer_in_target_contacts=u.id in visible)
+        for c, u in rows
+    ]
 
 
 # --- Bot creation -----------------------------------------------------------
