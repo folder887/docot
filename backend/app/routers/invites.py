@@ -215,7 +215,7 @@ def join_via_invite(
                 # was previously approved left the chat and now wants to
                 # rejoin via the same invite.
                 req.status = "pending"
-                req.decided_by = None
+                req.decided_by = ""
                 req.decided_at = None
                 req.created_at = now_ms()
                 req.invite_token = token
