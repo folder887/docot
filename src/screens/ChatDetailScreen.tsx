@@ -9,8 +9,10 @@ import { MessageContent } from '../components/MessageBubble'
 import { Modal, ConfirmDialog } from '../components/Modal'
 import { IconLock } from '../components/Icons'
 import { api, getToken, openChatWebSocket } from '../api'
+import type { ApiReportIn } from '../api'
 import type { Message } from '../types'
 import { recallOutgoing } from '../crypto/outgoing'
+import { exportChatAsJSON } from '../util/exportChat'
 
 // Same six picks exposed by Telegram, Slack and Apple Messages: covers the
 // 80% case so most users never need to open a full picker.
@@ -45,6 +47,7 @@ export function ChatDetailScreen() {
   const [replyTo, setReplyTo] = useState<{ id: string; preview: string; author?: string } | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<Message | null>(null)
   const [forwardOpen, setForwardOpen] = useState<Message | null>(null)
+  const [reportOpen, setReportOpen] = useState<Message | null>(null)
   const [copied, setCopied] = useState(false)
 
   useEffect(() => {
@@ -227,6 +230,17 @@ export function ChatDetailScreen() {
                 <span className="truncate">{subtitle}</span>
               </div>
             </div>
+          </button>
+        }
+        right={
+          <button
+            type="button"
+            onClick={() => exportChatAsJSON(chat, state.users)}
+            className="row-press rounded-full p-1.5 text-[10px] font-black"
+            aria-label={t('chat.export', state.lang)}
+            title={t('chat.export', state.lang)}
+          >
+            ⇩
           </button>
         }
       />
@@ -425,6 +439,16 @@ export function ChatDetailScreen() {
                 setActionFor(null)
               }}
             />
+            {actionFor.authorId !== myId && (
+              <Sheet
+                destructive
+                label={t('msg.report', state.lang)}
+                onClick={() => {
+                  setReportOpen(actionFor)
+                  setActionFor(null)
+                }}
+              />
+            )}
             <Sheet
               destructive
               label={t('msg.delete', state.lang)}
@@ -436,6 +460,10 @@ export function ChatDetailScreen() {
           </ul>
         )}
       </Modal>
+
+      {reportOpen && (
+        <ReportSheet message={reportOpen} onClose={() => setReportOpen(null)} />
+      )}
 
       <ConfirmDialog
         open={!!confirmDelete}
@@ -499,10 +527,26 @@ function ForwardSheet({
   onClose: () => void
   currentChatId: string
 }) {
-  const { state, sendMessage } = useApp()
+  const { state, sendMessage, userById } = useApp()
+  const [hideAuthor, setHideAuthor] = useState(false)
   const candidates = state.chats.filter((c) => c.id !== currentChatId)
+  const author = userById(message.authorId)
+  const handle = author?.handle ? `@${author.handle}` : author?.name ?? 'unknown'
+  const formatForward = (txt: string): string => {
+    if (hideAuthor) return txt
+    return `> ${t('msg.forward', state.lang)} · ${handle}\n${txt}`
+  }
   return (
     <Modal open onClose={onClose} title={t('msg.forward', state.lang)}>
+      <label className="mb-2 flex items-center justify-between gap-2 rounded-2xl border-2 border-ink px-3 py-2 text-sm font-bold">
+        <span>{t('msg.forwardHideAuthor', state.lang)}</span>
+        <input
+          type="checkbox"
+          checked={hideAuthor}
+          onChange={(e) => setHideAuthor(e.target.checked)}
+          className="h-5 w-5 accent-current"
+        />
+      </label>
       <ul className="flex max-h-[50vh] flex-col gap-1 overflow-y-auto">
         {candidates.length === 0 && (
           <li className="text-center text-sm text-muted">No other chats</li>
@@ -511,7 +555,7 @@ function ForwardSheet({
           <li key={c.id}>
             <button
               onClick={async () => {
-                await sendMessage(c.id, message.text || '')
+                await sendMessage(c.id, formatForward(message.text || ''))
                 onClose()
               }}
               className="row-press flex w-full items-center gap-3 rounded-2xl border border-line px-3 py-2 text-left"
@@ -525,6 +569,88 @@ function ForwardSheet({
       <button className="bw-btn-ghost mt-3 w-full" onClick={onClose}>
         {t('common.close', state.lang)}
       </button>
+    </Modal>
+  )
+}
+
+function ReportSheet({
+  message,
+  onClose,
+}: {
+  message: Message
+  onClose: () => void
+}) {
+  const { state } = useApp()
+  const [reason, setReason] = useState<ApiReportIn['reason']>('spam')
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [done, setDone] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const reasons: ApiReportIn['reason'][] = ['spam', 'abuse', 'illegal', 'impersonation', 'other']
+  const submit = async () => {
+    setBusy(true)
+    setErr(null)
+    try {
+      await api.report({
+        subjectKind: 'message',
+        subjectId: message.id,
+        reason,
+        note: note.slice(0, 500),
+      })
+      setDone(true)
+      window.setTimeout(onClose, 1500)
+    } catch (e) {
+      setErr((e as Error).message || 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <Modal open onClose={onClose} title={t('msg.report', state.lang)}>
+      {done ? (
+        <div className="py-4 text-center text-sm font-bold">{t('report.thanks', state.lang)}</div>
+      ) : (
+        <div className="flex flex-col gap-3">
+          <div className="text-sm font-bold">{t('report.reason', state.lang)}</div>
+          <div className="grid grid-cols-1 gap-1">
+            {reasons.map((r) => (
+              <label
+                key={r}
+                className={`flex items-center gap-2 rounded-2xl border-2 border-ink px-3 py-2 text-sm font-bold ${
+                  reason === r ? 'bg-ink text-paper' : ''
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="report-reason"
+                  value={r}
+                  checked={reason === r}
+                  onChange={() => setReason(r)}
+                  className="h-4 w-4 accent-current"
+                />
+                {t(`report.${r}`, state.lang)}
+              </label>
+            ))}
+          </div>
+          <textarea
+            className="bw-input"
+            placeholder={t('report.note', state.lang)}
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            maxLength={500}
+            rows={3}
+          />
+          {err && <div className="text-sm font-bold text-red-700">{err}</div>}
+          <button
+            type="button"
+            className="bw-btn-primary"
+            onClick={submit}
+            disabled={busy}
+          >
+            {busy ? '…' : t('report.submit', state.lang)}
+          </button>
+        </div>
+      )}
     </Modal>
   )
 }

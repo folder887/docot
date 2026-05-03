@@ -129,6 +129,31 @@ def list_devices(
     )
 
 
+@router.delete("/devices/{device_id}")
+def revoke_own_device(
+    device_id: int,
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Remove one of the caller's own Signal device bundles + its prekeys.
+
+    This is the "remote logout" primitive: any peer fanning out a message
+    will skip this device on the next send because it disappears from
+    `/keys/devices/{user_id}`. The device's local keys / JWT remain valid
+    against unrelated endpoints, but it can no longer receive new
+    encrypted messages because senders won't have a bundle to encrypt to.
+    """
+    row = _bundle_row_for(me.id, device_id, db)
+    if not row:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="device_not_found")
+    db.query(OneTimePreKey).filter(
+        OneTimePreKey.user_id == me.id, OneTimePreKey.device_id == device_id
+    ).delete(synchronize_session=False)
+    db.delete(row)
+    db.commit()
+    return {"ok": True, "deviceId": device_id}
+
+
 @router.get("/bundle/{user_id}/{device_id}", response_model=KeyBundleOut)
 def fetch_bundle_for_device(
     user_id: str,

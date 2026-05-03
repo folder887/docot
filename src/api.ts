@@ -562,6 +562,12 @@ export const api = {
   /** All known device bundles for a user; senders fan out one envelope per device. */
   listUserDevices: (userId: string) =>
     request<ApiDeviceList>(`/keys/devices/${encodeURIComponent(userId)}`),
+  /** Revoke one of the caller's own Signal device bundles (remote logout). */
+  revokeOwnDevice: (deviceId: number) =>
+    request<{ ok: boolean; deviceId: number }>(
+      `/keys/devices/${deviceId}`,
+      { method: 'DELETE' },
+    ),
   getKeyBundleForDevice: (userId: string, deviceId: number) =>
     request<ApiKeyBundle>(
       `/keys/bundle/${encodeURIComponent(userId)}/${deviceId}`,

@@ -387,6 +387,18 @@ const DICT: Dict = {
   'msg.unpin': { en: 'Unpin', ru: 'Открепить' },
   'msg.pinned': { en: 'Pinned', ru: 'Закреплено' },
   'msg.viewPinned': { en: 'View pinned', ru: 'Закреплённые' },
+  'msg.report': { en: 'Report', ru: 'Пожаловаться' },
+  'msg.forwardHideAuthor': { en: 'Hide original author', ru: 'Скрыть автора' },
+  'report.reason': { en: 'Reason', ru: 'Причина' },
+  'report.note': { en: 'Note (optional)', ru: 'Комментарий (необязательно)' },
+  'report.submit': { en: 'Submit report', ru: 'Отправить жалобу' },
+  'report.thanks': { en: 'Thanks. Moderators will review.', ru: 'Спасибо. Модераторы рассмотрят.' },
+  'report.spam': { en: 'Spam', ru: 'Спам' },
+  'report.abuse': { en: 'Harassment or abuse', ru: 'Оскорбления / травля' },
+  'report.illegal': { en: 'Illegal content', ru: 'Незаконный контент' },
+  'report.impersonation': { en: 'Impersonation', ru: 'Подмена личности' },
+  'report.other': { en: 'Other', ru: 'Другое' },
+  'chat.export': { en: 'Export chat (.json)', ru: 'Экспорт чата (.json)' },
 }
 
 export function t(key: string, lang: Lang): string {
