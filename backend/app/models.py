@@ -428,4 +428,26 @@ class OneTimePreKey(Base):
     created_at: Mapped[int] = mapped_column(Integer, default=now_ms)
 
 
+class Report(Base):
+    """Abuse report filed by a user. Subject can be a user, a message, a
+    chat, a post, or a comment. Stored forever for audit; the app exposes
+    nothing back to users beyond an ack."""
+
+    __tablename__ = "reports"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: gen_id("rep_"))
+    reporter_id: Mapped[str] = mapped_column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    # One of: "user" | "message" | "chat" | "post" | "comment"
+    subject_kind: Mapped[str] = mapped_column(String(16), index=True)
+    subject_id: Mapped[str] = mapped_column(String, index=True)
+    # One of: "spam" | "abuse" | "illegal" | "impersonation" | "other"
+    reason: Mapped[str] = mapped_column(String(32), index=True)
+    note: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[int] = mapped_column(Integer, default=now_ms, index=True)
+    # "new" | "reviewing" | "actioned" | "dismissed" — mutated by admins only
+    status: Mapped[str] = mapped_column(String(16), default="new", index=True)
+
+
 Index("ix_messages_chat_created", Message.chat_id, Message.created_at)

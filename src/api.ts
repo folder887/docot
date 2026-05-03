@@ -582,7 +582,32 @@ export const api = {
     if (!res.ok) throw new ApiError(res.status, res.statusText)
     return (await res.json()) as ApiUpload
   },
+
+  // Link previews — server-side OpenGraph scrape with SSRF protection.
+  linkPreview: (url: string) =>
+    request<ApiLinkPreview>(`/link-preview?url=${encodeURIComponent(url)}`),
+
+  // Abuse reports — fire-and-forget, server stores for moderator review.
+  report: (body: ApiReportIn) =>
+    request<ApiReportOut>('/reports', { method: 'POST', body: JSON.stringify(body) }),
 }
+
+export type ApiLinkPreview = {
+  url: string
+  finalUrl: string
+  title: string
+  description: string
+  image: string
+  siteName: string
+}
+
+export type ApiReportIn = {
+  subjectKind: 'user' | 'message' | 'chat' | 'post' | 'comment'
+  subjectId: string
+  reason: 'spam' | 'abuse' | 'illegal' | 'impersonation' | 'other'
+  note?: string
+}
+export type ApiReportOut = { id: string; status: string }
 
 export type ApiOneTimePreKey = { keyId: number; publicKey: string }
 export type ApiKeyBundleIn = {
