@@ -8,8 +8,15 @@ from sqlalchemy.orm import Session
 
 from ..auth import current_user
 from ..db import get_db
-from ..models import Chat, ChatInvite, ChatMember, User, now_ms
-from ..schemas import ChatOut, InviteCreateIn, InviteInfoOut, InviteOut
+from ..models import Chat, ChatInvite, ChatMember, InviteRequest, User, now_ms
+from ..schemas import (
+    ChatOut,
+    InviteCreateIn,
+    InviteInfoOut,
+    InviteOut,
+    InviteRequestDecideIn,
+    InviteRequestOut,
+)
 
 router = APIRouter(tags=["invites"])
 
@@ -33,7 +40,21 @@ def _to_out(inv: ChatInvite) -> InviteOut:
         maxUses=inv.max_uses,
         uses=inv.uses,
         revoked=inv.revoked,
+        requireApproval=bool(getattr(inv, "require_approval", False)),
+        name=getattr(inv, "name", "") or "",
         url=_invite_url(inv.token),
+    )
+
+
+def _to_request_out(req: InviteRequest) -> InviteRequestOut:
+    return InviteRequestOut(
+        id=req.id,
+        chatId=req.chat_id,
+        userId=req.user_id,
+        inviteToken=req.invite_token or "",
+        note=req.note or "",
+        status=req.status,
+        createdAt=req.created_at,
     )
 
 
@@ -83,6 +104,8 @@ def create_invite(
         created_by=me.id,
         expires_at=body.expiresAt,
         max_uses=body.maxUses,
+        require_approval=bool(body.requireApproval) if body.requireApproval is not None else False,
+        name=(body.name or "")[:80],
     )
     db.add(inv)
     db.commit()
@@ -141,6 +164,7 @@ def get_invite_info(
         description=getattr(chat, "description", "") or "",
         memberCount=member_count,
         valid=_is_active(inv),
+        requireApproval=bool(getattr(inv, "require_approval", False)),
     )
 
 
@@ -164,6 +188,35 @@ def join_via_invite(
         .first()
     )
     if not existing:
+        # Approval mode: don't add the user; create / refresh a pending
+        # request and return the chat in a stub form so the client can
+        # show "awaiting approval".
+        if bool(getattr(inv, "require_approval", False)):
+            req = (
+                db.query(InviteRequest)
+                .filter(
+                    InviteRequest.chat_id == chat.id,
+                    InviteRequest.user_id == me.id,
+                )
+                .first()
+            )
+            if req is None:
+                db.add(
+                    InviteRequest(
+                        chat_id=chat.id,
+                        user_id=me.id,
+                        invite_token=token,
+                        status="pending",
+                    )
+                )
+                db.commit()
+            elif req.status == "denied":
+                # Allow re-requesting after a denial.
+                req.status = "pending"
+                req.created_at = now_ms()
+                req.invite_token = token
+                db.commit()
+            raise HTTPException(status_code=202, detail="Approval required")
         # Atomically claim a slot. If max_uses is set, only succeed when
         # there's still room; the WHERE clause makes check-and-increment a
         # single SQL operation, preventing the TOCTOU race where two
@@ -192,3 +245,66 @@ def join_via_invite(
         db.commit()
         db.refresh(chat)
     return _chat_out(db, chat, me.id, with_history=True)
+
+
+# ---------------------------------------------------------------------------
+# Approval queue: admins approve/deny pending join requests.
+# ---------------------------------------------------------------------------
+
+
+@router.get("/chats/{chat_id}/invite-requests", response_model=list[InviteRequestOut])
+def list_invite_requests(
+    chat_id: str,
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> list[InviteRequestOut]:
+    _require_admin(db, chat_id, me.id)
+    rows = (
+        db.query(InviteRequest)
+        .filter(InviteRequest.chat_id == chat_id, InviteRequest.status == "pending")
+        .order_by(InviteRequest.created_at.asc())
+        .all()
+    )
+    return [_to_request_out(r) for r in rows]
+
+
+@router.post(
+    "/chats/{chat_id}/invite-requests/{request_id}",
+    response_model=InviteRequestOut,
+)
+def decide_invite_request(
+    chat_id: str,
+    request_id: int,
+    body: InviteRequestDecideIn,
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> InviteRequestOut:
+    _require_admin(db, chat_id, me.id)
+    req = db.get(InviteRequest, request_id)
+    if not req or req.chat_id != chat_id:
+        raise HTTPException(status_code=404, detail="Request not found")
+    if req.status != "pending":
+        raise HTTPException(status_code=409, detail="Already decided")
+    req.status = "approved" if body.approve else "denied"
+    req.decided_by = me.id
+    req.decided_at = now_ms()
+    if body.approve:
+        existing = (
+            db.query(ChatMember)
+            .filter(
+                ChatMember.chat_id == chat_id,
+                ChatMember.user_id == req.user_id,
+            )
+            .first()
+        )
+        if not existing:
+            db.add(
+                ChatMember(
+                    chat_id=chat_id,
+                    user_id=req.user_id,
+                    role="member",
+                )
+            )
+    db.commit()
+    db.refresh(req)
+    return _to_request_out(req)

@@ -56,6 +56,15 @@ _MIGRATIONS: list[tuple[str, str, str]] = [
     ("messages", "pinned_at", "INTEGER"),
     ("posts", "community_id", "VARCHAR NOT NULL DEFAULT ''"),
     ("posts", "title", "VARCHAR(300) NOT NULL DEFAULT ''"),
+    # v0.1.6: topics + admin log + content restrictions + invite requests
+    ("messages", "topic_id", "VARCHAR"),
+    ("chats", "ban_media", "INTEGER NOT NULL DEFAULT 0"),
+    ("chats", "ban_voice", "INTEGER NOT NULL DEFAULT 0"),
+    ("chats", "ban_stickers", "INTEGER NOT NULL DEFAULT 0"),
+    ("chats", "ban_links", "INTEGER NOT NULL DEFAULT 0"),
+    ("chats", "topics_enabled", "INTEGER NOT NULL DEFAULT 0"),
+    ("chat_invites", "require_approval", "INTEGER NOT NULL DEFAULT 0"),
+    ("chat_invites", "name", "VARCHAR(80) NOT NULL DEFAULT ''"),
 ]
 
 

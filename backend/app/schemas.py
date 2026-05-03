@@ -89,6 +89,7 @@ class MessageOut(BaseModel):
     sealed: bool = False
     pinned: bool = False
     pinnedAt: int | None = None
+    topicId: str | None = None
     reactions: list[ReactionAggOut] = []
 
     class Config:
@@ -108,6 +109,7 @@ class MessageIn(BaseModel):
     # When true (DM only), the server stores the real author privately but the
     # public `authorId` field is blanked in API responses and WS events.
     sealed: bool = False
+    topicId: str | None = None
 
 
 class MessagePatch(BaseModel):
@@ -125,6 +127,11 @@ class ChatOut(BaseModel):
     subscribersOnly: bool = False
     signedPosts: bool = False
     autoDeleteSeconds: int = 0
+    banMedia: bool = False
+    banVoice: bool = False
+    banStickers: bool = False
+    banLinks: bool = False
+    topicsEnabled: bool = False
     createdBy: str | None = None
     participants: list[str]
     pinned: bool = False
@@ -151,6 +158,11 @@ class ChatPatch(BaseModel):
     subscribersOnly: bool | None = None
     signedPosts: bool | None = None
     autoDeleteSeconds: int | None = Field(default=None, ge=0, le=60 * 60 * 24 * 365)
+    banMedia: bool | None = None
+    banVoice: bool | None = None
+    banStickers: bool | None = None
+    banLinks: bool | None = None
+    topicsEnabled: bool | None = None
 
 
 class ChatMemberOut(BaseModel):
@@ -172,12 +184,16 @@ class InviteOut(BaseModel):
     maxUses: int | None = None
     uses: int = 0
     revoked: bool = False
+    requireApproval: bool = False
+    name: str = ""
     url: str = ""
 
 
 class InviteCreateIn(BaseModel):
     expiresAt: int | None = None
     maxUses: int | None = None
+    requireApproval: bool | None = None
+    name: str | None = None
 
 
 class InviteInfoOut(BaseModel):
@@ -188,6 +204,7 @@ class InviteInfoOut(BaseModel):
     description: str = ""
     memberCount: int = 0
     valid: bool = True
+    requireApproval: bool = False
 
 
 class NoteOut(BaseModel):
@@ -426,6 +443,56 @@ class PollCreateIn(BaseModel):
 
 class PollVoteIn(BaseModel):
     optionIds: list[int] = Field(min_length=0, max_length=12)
+
+
+# ---------------- v0.1.6: topics, admin log, invite requests ----------------
+
+
+class TopicOut(BaseModel):
+    id: str
+    chatId: str
+    title: str
+    icon: str = ""
+    createdBy: str
+    createdAt: int
+    closed: bool = False
+    lastMessageAt: int
+
+
+class TopicCreateIn(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
+    icon: str = Field(default="", max_length=8)
+
+
+class TopicPatchIn(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=120)
+    icon: str | None = Field(default=None, max_length=8)
+    closed: bool | None = None
+
+
+class AdminLogOut(BaseModel):
+    id: int
+    chatId: str
+    actorId: str
+    targetKind: str
+    targetId: str
+    action: str
+    payload: dict[str, str | int | bool | None] = {}
+    createdAt: int
+
+
+class InviteRequestOut(BaseModel):
+    id: int
+    chatId: str
+    userId: str
+    inviteToken: str = ""
+    note: str = ""
+    status: str
+    createdAt: int
+
+
+class InviteRequestDecideIn(BaseModel):
+    approve: bool
 
 
 AuthOut.model_rebuild()

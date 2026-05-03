@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import re
 from collections import defaultdict
 
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
@@ -9,8 +11,18 @@ from sqlalchemy.orm import Session
 
 from ..auth import current_user, user_from_token
 from ..db import SessionLocal, get_db
-from ..models import Chat, ChatMember, Message, MessageReaction, User, now_ms
+from ..models import (
+    AdminLog,
+    Chat,
+    ChatMember,
+    Message,
+    MessageReaction,
+    Topic,
+    User,
+    now_ms,
+)
 from ..schemas import (
+    AdminLogOut,
     ChatCreateIn,
     ChatMemberOut,
     ChatMemberPatch,
@@ -21,10 +33,47 @@ from ..schemas import (
     MessagePatch,
     ReactionAggOut,
     ReactionIn,
+    TopicCreateIn,
+    TopicOut,
+    TopicPatchIn,
 )
 from ..ws import hub
 
 router = APIRouter(prefix="/chats", tags=["chats"])
+
+# Conservative URL detector — matches http(s)://… and bare host.tld
+# patterns. Regular host words like "example" don't match; the dot is
+# required, mirroring user expectations of "a link".
+_LINK_RX = re.compile(
+    r"https?://\S+|(?:^|\s)(?:[a-z0-9-]+\.)+[a-z]{2,}(?:/\S*)?",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_link(text: str) -> bool:
+    return bool(_LINK_RX.search(text or ""))
+
+
+def _audit(
+    db: Session,
+    chat_id: str,
+    actor_id: str,
+    action: str,
+    target_kind: str = "",
+    target_id: str = "",
+    payload: dict[str, object] | None = None,
+) -> None:
+    """Append an admin-log entry. Caller is responsible for the surrounding commit."""
+    db.add(
+        AdminLog(
+            chat_id=chat_id,
+            actor_id=actor_id,
+            action=action,
+            target_kind=target_kind,
+            target_id=target_id,
+            payload=json.dumps(payload or {}),
+        )
+    )
 
 
 def _msg_out(
@@ -55,6 +104,7 @@ def _msg_out(
         sealed=sealed,
         pinned=bool(getattr(m, "pinned", False)),
         pinnedAt=getattr(m, "pinned_at", None),
+        topicId=getattr(m, "topic_id", None),
         reactions=reactions or [],
     )
 
@@ -123,6 +173,11 @@ def _chat_out(db: Session, chat: Chat, me_id: str, with_history: bool = False) -
         subscribersOnly=bool(getattr(chat, "subscribers_only", False)),
         signedPosts=bool(getattr(chat, "signed_posts", False)),
         autoDeleteSeconds=int(getattr(chat, "auto_delete_seconds", 0) or 0),
+        banMedia=bool(getattr(chat, "ban_media", False)),
+        banVoice=bool(getattr(chat, "ban_voice", False)),
+        banStickers=bool(getattr(chat, "ban_stickers", False)),
+        banLinks=bool(getattr(chat, "ban_links", False)),
+        topicsEnabled=bool(getattr(chat, "topics_enabled", False)),
         createdBy=chat.created_by,
         participants=members,
         pinned=bool(membership and membership.pinned),
@@ -306,11 +361,18 @@ def list_messages(
     chat_id: str,
     before: int | None = None,
     limit: int = 100,
+    topicId: str | None = None,
     me: User = Depends(current_user),
     db: Session = Depends(get_db),
 ) -> list[MessageOut]:
     _require_member(db, chat_id, me.id)
     q = db.query(Message).filter(Message.chat_id == chat_id)
+    if topicId is not None:
+        # Empty string explicitly means "main feed only" (no topic).
+        if topicId == "":
+            q = q.filter(Message.topic_id.is_(None))
+        else:
+            q = q.filter(Message.topic_id == topicId)
     if before is not None:
         q = q.filter(Message.created_at < before)
     rows = q.order_by(Message.created_at.desc()).limit(max(1, min(limit, 500))).all()
@@ -372,12 +434,41 @@ async def post_message(
     # sender from chat membership. Reject it elsewhere so callers don't end up
     # with a permanently-anonymous group/channel post.
     sealed = bool(body.sealed) and chat.kind == "dm"
+    # Enforce admin-set content gates. Admins/owners are exempt so they can
+    # always moderate (e.g. paste a rules link in a no-links chat).
+    if not is_admin and not sealed:
+        text_for_check = body.text or ""
+        if bool(getattr(chat, "ban_links", False)) and _looks_like_link(text_for_check):
+            raise HTTPException(status_code=403, detail="Links are not allowed in this chat")
+        if bool(getattr(chat, "ban_stickers", False)) and text_for_check.startswith("__sticker:"):
+            raise HTTPException(status_code=403, detail="Stickers are not allowed in this chat")
+        if bool(getattr(chat, "ban_voice", False)) and text_for_check.startswith("__voice:"):
+            raise HTTPException(status_code=403, detail="Voice messages are not allowed in this chat")
+        if bool(getattr(chat, "ban_media", False)) and text_for_check.startswith(
+            ("__media:", "__file:", "__image:", "__video:")
+        ):
+            raise HTTPException(status_code=403, detail="Media is not allowed in this chat")
+    # Resolve the optional thread (topic) — only when the chat enabled topics
+    # and the topic exists, belongs to the same chat, and is not closed.
+    topic_id: str | None = None
+    if body.topicId:
+        if not bool(getattr(chat, "topics_enabled", False)):
+            raise HTTPException(status_code=400, detail="Topics are not enabled in this chat")
+        topic = db.get(Topic, body.topicId)
+        if not topic or topic.chat_id != chat.id:
+            raise HTTPException(status_code=404, detail="Topic not found")
+        if topic.closed and not is_admin:
+            raise HTTPException(status_code=403, detail="Topic is closed")
+        topic_id = topic.id
+        topic.last_message_at = now_ms()
+        db.add(topic)
     msg = Message(
         chat_id=chat.id,
         author_id=me.id,
         text=body.text,
         reply_to_id=reply_to_id,
         sealed=sealed,
+        topic_id=topic_id,
     )
     chat.updated_at = msg.created_at or now_ms()
     db.add(msg)
@@ -631,7 +722,26 @@ def update_chat(
         chat.signed_posts = bool(body.signedPosts)
     if body.autoDeleteSeconds is not None:
         chat.auto_delete_seconds = int(body.autoDeleteSeconds)
+    if body.banMedia is not None:
+        chat.ban_media = bool(body.banMedia)
+    if body.banVoice is not None:
+        chat.ban_voice = bool(body.banVoice)
+    if body.banStickers is not None:
+        chat.ban_stickers = bool(body.banStickers)
+    if body.banLinks is not None:
+        chat.ban_links = bool(body.banLinks)
+    if body.topicsEnabled is not None:
+        chat.topics_enabled = bool(body.topicsEnabled)
     chat.updated_at = now_ms()
+    _audit(
+        db,
+        chat.id,
+        me.id,
+        "chat_settings",
+        target_kind="chat",
+        target_id=chat.id,
+        payload={k: v for k, v in body.model_dump(exclude_none=True).items()},
+    )
     db.commit()
     db.refresh(chat)
     return _chat_out(db, chat, me.id)
@@ -673,9 +783,19 @@ def patch_member(
     )
     if not target:
         raise HTTPException(status_code=404, detail="Member not found")
+    prev_role = target.role
     if body.role == "owner":
         my_mem.role = "admin"
     target.role = body.role
+    _audit(
+        db,
+        chat.id,
+        me.id,
+        "role_change",
+        target_kind="user",
+        target_id=target.user_id,
+        payload={"from": prev_role, "to": target.role},
+    )
     db.commit()
     return ChatMemberOut(userId=target.user_id, role=target.role, joinedAt=target.joined_at)
 
@@ -705,6 +825,18 @@ def remove_member(
     if target.role == "owner" and target.user_id != me.id:
         raise HTTPException(status_code=403, detail="Cannot remove owner")
     db.delete(target)
+    if target.user_id != me.id:
+        _audit(
+            db,
+            chat.id,
+            me.id,
+            "member_kick",
+            target_kind="user",
+            target_id=target.user_id,
+            payload={"role": target.role},
+        )
+    else:
+        _audit(db, chat.id, me.id, "member_leave", target_kind="user", target_id=me.id)
     db.commit()
     return {"ok": True}
 
@@ -761,6 +893,182 @@ def delete_chat(
         db.delete(chat)
     db.commit()
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Topics (threads inside a group/channel)
+# ---------------------------------------------------------------------------
+
+
+def _topic_out(t: Topic) -> TopicOut:
+    return TopicOut(
+        id=t.id,
+        chatId=t.chat_id,
+        title=t.title,
+        icon=t.icon,
+        createdBy=t.created_by,
+        createdAt=t.created_at,
+        closed=bool(t.closed),
+        lastMessageAt=int(t.last_message_at or t.created_at),
+    )
+
+
+def _require_chat_admin(db: Session, chat: Chat, user_id: str) -> ChatMember:
+    mem = (
+        db.query(ChatMember)
+        .filter(ChatMember.chat_id == chat.id, ChatMember.user_id == user_id)
+        .first()
+    )
+    if not mem or mem.role not in ("owner", "admin"):
+        raise HTTPException(status_code=403, detail="Admin only")
+    return mem
+
+
+@router.get("/{chat_id}/topics", response_model=list[TopicOut])
+def list_topics(
+    chat_id: str,
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> list[TopicOut]:
+    _require_member(db, chat_id, me.id)
+    rows = (
+        db.query(Topic)
+        .filter(Topic.chat_id == chat_id)
+        .order_by(Topic.last_message_at.desc())
+        .limit(500)
+        .all()
+    )
+    return [_topic_out(t) for t in rows]
+
+
+@router.post("/{chat_id}/topics", response_model=TopicOut)
+def create_topic(
+    chat_id: str,
+    body: TopicCreateIn,
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> TopicOut:
+    chat = _require_member(db, chat_id, me.id)
+    if chat.kind == "dm":
+        raise HTTPException(status_code=400, detail="Topics are not available in DMs")
+    if not bool(getattr(chat, "topics_enabled", False)):
+        raise HTTPException(status_code=400, detail="Topics are not enabled in this chat")
+    _require_chat_admin(db, chat, me.id)
+    t = Topic(
+        chat_id=chat.id,
+        title=body.title.strip()[:120],
+        icon=(body.icon or "")[:8],
+        created_by=me.id,
+    )
+    db.add(t)
+    db.flush()
+    _audit(
+        db,
+        chat.id,
+        me.id,
+        "topic_create",
+        target_kind="topic",
+        target_id=t.id,
+        payload={"title": t.title},
+    )
+    db.commit()
+    db.refresh(t)
+    return _topic_out(t)
+
+
+@router.patch("/{chat_id}/topics/{topic_id}", response_model=TopicOut)
+def update_topic(
+    chat_id: str,
+    topic_id: str,
+    body: TopicPatchIn,
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> TopicOut:
+    chat = _require_member(db, chat_id, me.id)
+    _require_chat_admin(db, chat, me.id)
+    t = db.get(Topic, topic_id)
+    if not t or t.chat_id != chat.id:
+        raise HTTPException(status_code=404, detail="Topic not found")
+    changes: dict[str, object] = {}
+    if body.title is not None:
+        t.title = body.title.strip()[:120]
+        changes["title"] = t.title
+    if body.icon is not None:
+        t.icon = body.icon[:8]
+        changes["icon"] = t.icon
+    if body.closed is not None:
+        t.closed = bool(body.closed)
+        changes["closed"] = t.closed
+    _audit(
+        db,
+        chat.id,
+        me.id,
+        "topic_update",
+        target_kind="topic",
+        target_id=t.id,
+        payload=changes,
+    )
+    db.commit()
+    db.refresh(t)
+    return _topic_out(t)
+
+
+@router.delete("/{chat_id}/topics/{topic_id}")
+def delete_topic(
+    chat_id: str,
+    topic_id: str,
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    chat = _require_member(db, chat_id, me.id)
+    _require_chat_admin(db, chat, me.id)
+    t = db.get(Topic, topic_id)
+    if not t or t.chat_id != chat.id:
+        raise HTTPException(status_code=404, detail="Topic not found")
+    db.delete(t)
+    _audit(db, chat.id, me.id, "topic_delete", target_kind="topic", target_id=topic_id)
+    db.commit()
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Admin action log
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{chat_id}/admin-log", response_model=list[AdminLogOut])
+def list_admin_log(
+    chat_id: str,
+    before: int | None = None,
+    limit: int = 100,
+    me: User = Depends(current_user),
+    db: Session = Depends(get_db),
+) -> list[AdminLogOut]:
+    chat = _require_member(db, chat_id, me.id)
+    _require_chat_admin(db, chat, me.id)
+    q = db.query(AdminLog).filter(AdminLog.chat_id == chat_id)
+    if before is not None:
+        q = q.filter(AdminLog.created_at < before)
+    rows = q.order_by(AdminLog.created_at.desc()).limit(max(1, min(limit, 500))).all()
+    out: list[AdminLogOut] = []
+    for r in rows:
+        try:
+            payload = json.loads(r.payload) if r.payload else {}
+        except (ValueError, TypeError):
+            payload = {}
+        out.append(
+            AdminLogOut(
+                id=r.id,
+                chatId=r.chat_id,
+                actorId=r.actor_id,
+                targetKind=r.target_kind or "",
+                targetId=r.target_id or "",
+                action=r.action,
+                payload=payload,
+                createdAt=r.created_at,
+            )
+        )
+    return out
 
 
 @router.websocket("/ws")
