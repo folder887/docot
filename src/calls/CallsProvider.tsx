@@ -486,19 +486,19 @@ export function CallsProvider({ children }: { children: ReactNode }) {
     [sendSignal],
   )
 
+  // Toggle helpers keep the setState updater pure — sending the
+  // `call:media` signal lives outside it, so React.StrictMode's
+  // double-invocation of updaters won't ship the change twice.
   const toggleMic = useCallback(() => {
     const ls = localStreamRef.current
     if (!ls) return
     const audio = ls.getAudioTracks()[0]
     if (!audio) return
     audio.enabled = !audio.enabled
-    setState((s) => {
-      if (!('mic' in s)) return s
-      const next = { ...s, mic: audio.enabled } as CallState
-      const cam = 'cam' in s ? (s as { cam: boolean }).cam : false
-      sendMediaState(audio.enabled, cam)
-      return next
-    })
+    setState((s) => (('mic' in s) ? ({ ...s, mic: audio.enabled } as CallState) : s))
+    const cur = stateRef.current
+    const cam = 'cam' in cur ? (cur as { cam: boolean }).cam : false
+    sendMediaState(audio.enabled, cam)
   }, [sendMediaState])
 
   const toggleCam = useCallback(() => {
@@ -507,13 +507,10 @@ export function CallsProvider({ children }: { children: ReactNode }) {
     const video = ls.getVideoTracks()[0]
     if (!video) return
     video.enabled = !video.enabled
-    setState((s) => {
-      if (!('cam' in s)) return s
-      const next = { ...s, cam: video.enabled } as CallState
-      const mic = 'mic' in s ? (s as { mic: boolean }).mic : true
-      sendMediaState(mic, video.enabled)
-      return next
-    })
+    setState((s) => (('cam' in s) ? ({ ...s, cam: video.enabled } as CallState) : s))
+    const cur = stateRef.current
+    const mic = 'mic' in cur ? (cur as { mic: boolean }).mic : true
+    sendMediaState(mic, video.enabled)
   }, [sendMediaState])
 
   const clearEnded = useCallback(() => {
