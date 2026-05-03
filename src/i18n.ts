@@ -399,6 +399,21 @@ const DICT: Dict = {
   'report.impersonation': { en: 'Impersonation', ru: 'Подмена личности' },
   'report.other': { en: 'Other', ru: 'Другое' },
   'chat.export': { en: 'Export chat (.json)', ru: 'Экспорт чата (.json)' },
+  'call.audio': { en: 'Audio call', ru: 'Аудиозвонок' },
+  'call.video': { en: 'Video call', ru: 'Видеозвонок' },
+  'call.calling': { en: 'Calling…', ru: 'Вызов…' },
+  'call.ringing': { en: 'Ringing…', ru: 'Звоним…' },
+  'call.incoming': { en: 'Incoming call', ru: 'Входящий звонок' },
+  'call.connecting': { en: 'Connecting…', ru: 'Соединение…' },
+  'call.rejected': { en: 'Call declined', ru: 'Вызов отклонён' },
+  'call.unreachable': { en: 'User is unavailable', ru: 'Пользователь недоступен' },
+  'call.failed': { en: 'Call failed', ru: 'Вызов не удался' },
+  'call.ended': { en: 'Call ended', ru: 'Звонок завершён' },
+  'call.accept': { en: 'Accept', ru: 'Принять' },
+  'call.reject': { en: 'Decline', ru: 'Отклонить' },
+  'call.end': { en: 'End', ru: 'Завершить' },
+  'call.mute': { en: 'Mute', ru: 'Микрофон' },
+  'call.cam': { en: 'Camera', ru: 'Камера' },
 }
 
 export function t(key: string, lang: Lang): string {
