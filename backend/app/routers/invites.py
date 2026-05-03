@@ -216,7 +216,9 @@ def join_via_invite(
                 req.created_at = now_ms()
                 req.invite_token = token
                 db.commit()
-            raise HTTPException(status_code=202, detail="Approval required")
+            # 4xx so the client treats this as an error path; the marker
+            # detail lets the join screen surface a "pending approval" UX.
+            raise HTTPException(status_code=403, detail="approval-required")
         # Atomically claim a slot. If max_uses is set, only succeed when
         # there's still room; the WHERE clause makes check-and-increment a
         # single SQL operation, preventing the TOCTOU race where two

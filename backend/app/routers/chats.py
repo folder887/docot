@@ -54,6 +54,25 @@ def _looks_like_link(text: str) -> bool:
     return bool(_LINK_RX.search(text or ""))
 
 
+def _enforce_content_gates(chat: Chat, text: str) -> None:
+    """Reject messages whose payload violates an admin-set content gate.
+
+    Called from both message-create and message-edit so an unprivileged user
+    cannot post benign text and then edit it into a banned format.
+    """
+    text_for_check = text or ""
+    if bool(getattr(chat, "ban_links", False)) and _looks_like_link(text_for_check):
+        raise HTTPException(status_code=403, detail="Links are not allowed in this chat")
+    if bool(getattr(chat, "ban_stickers", False)) and text_for_check.startswith("__sticker:"):
+        raise HTTPException(status_code=403, detail="Stickers are not allowed in this chat")
+    if bool(getattr(chat, "ban_voice", False)) and text_for_check.startswith("__voice:"):
+        raise HTTPException(status_code=403, detail="Voice messages are not allowed in this chat")
+    if bool(getattr(chat, "ban_media", False)) and text_for_check.startswith(
+        ("__media:", "__file:", "__image:", "__video:")
+    ):
+        raise HTTPException(status_code=403, detail="Media is not allowed in this chat")
+
+
 def _audit(
     db: Session,
     chat_id: str,
@@ -437,17 +456,7 @@ async def post_message(
     # Enforce admin-set content gates. Admins/owners are exempt so they can
     # always moderate (e.g. paste a rules link in a no-links chat).
     if not is_admin and not sealed:
-        text_for_check = body.text or ""
-        if bool(getattr(chat, "ban_links", False)) and _looks_like_link(text_for_check):
-            raise HTTPException(status_code=403, detail="Links are not allowed in this chat")
-        if bool(getattr(chat, "ban_stickers", False)) and text_for_check.startswith("__sticker:"):
-            raise HTTPException(status_code=403, detail="Stickers are not allowed in this chat")
-        if bool(getattr(chat, "ban_voice", False)) and text_for_check.startswith("__voice:"):
-            raise HTTPException(status_code=403, detail="Voice messages are not allowed in this chat")
-        if bool(getattr(chat, "ban_media", False)) and text_for_check.startswith(
-            ("__media:", "__file:", "__image:", "__video:")
-        ):
-            raise HTTPException(status_code=403, detail="Media is not allowed in this chat")
+        _enforce_content_gates(chat, body.text or "")
     # Resolve the optional thread (topic) — only when the chat enabled topics
     # and the topic exists, belongs to the same chat, and is not closed.
     topic_id: str | None = None
@@ -498,6 +507,16 @@ async def edit_message(
         raise HTTPException(status_code=410, detail="Message deleted")
     if msg.author_id != me.id:
         raise HTTPException(status_code=403, detail="Cannot edit others' messages")
+    chat = db.get(Chat, chat_id)
+    if chat is not None and not bool(msg.sealed):
+        member = (
+            db.query(ChatMember)
+            .filter(ChatMember.chat_id == chat_id, ChatMember.user_id == me.id)
+            .first()
+        )
+        is_admin_edit = bool(member and member.role in ("owner", "admin"))
+        if not is_admin_edit:
+            _enforce_content_gates(chat, body.text or "")
     msg.text = body.text
     if body.sealed is not None:
         # Sealed flag may toggle if the new ciphertext is sealed but the old
