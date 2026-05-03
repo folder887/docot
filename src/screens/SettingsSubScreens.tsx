@@ -397,6 +397,26 @@ function ChatSection() {
 
       <SectionHeader text="Chat list" />
       <Toggle label={t('settings.compact', lang)} value={state.prefs.compactMode} onChange={(v) => setPrefs({ compactMode: v })} />
+
+      <SectionHeader text={t('settings.media', lang)} />
+      <div className="border-b border-line px-4 py-3">
+        <div className="font-bold">{t('settings.mediaQuality', lang)}</div>
+        <div className="mb-2 text-xs text-muted">{t('settings.mediaQualityHint', lang)}</div>
+        <div className="mt-1 flex gap-2">
+          {(['fast', 'original'] as const).map((q) => (
+            <button
+              key={q}
+              type="button"
+              onClick={() => setPrefs({ mediaQuality: q })}
+              className={`flex-1 rounded-full border-2 border-ink px-2 py-1.5 text-xs font-bold ${
+                state.prefs.mediaQuality === q ? 'bg-ink text-paper' : 'bg-paper text-ink'
+              }`}
+            >
+              {t(`settings.mediaQuality.${q}`, lang)}
+            </button>
+          ))}
+        </div>
+      </div>
     </div>
   )
 }

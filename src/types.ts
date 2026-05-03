@@ -21,6 +21,9 @@ export type Prefs = {
   autoNight: boolean
   /** Show desktop / system notifications on incoming messages. */
   notifications: boolean
+  /** "fast" downscales/compresses images before upload; "original" keeps full
+   *  resolution. */
+  mediaQuality: 'fast' | 'original'
 }
 
 export type User = {
@@ -225,4 +228,5 @@ export const defaultPrefs: Prefs = {
   fontSize: 'md',
   autoNight: false,
   notifications: false,
+  mediaQuality: 'fast',
 }

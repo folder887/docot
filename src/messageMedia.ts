@@ -6,7 +6,7 @@ import { uploadUrl } from './api'
  * Backwards compatible — anything that fails to parse is rendered as text.
  */
 
-export type MediaKind = 'voice' | 'image' | 'video' | 'file'
+export type MediaKind = 'voice' | 'image' | 'video' | 'file' | 'sticker' | 'video-circle'
 
 export type MediaDescriptor = {
   kind: MediaKind
@@ -22,6 +22,12 @@ export type MediaDescriptor = {
   d?: number
   /** optional caption (image / file) */
   c?: string
+  /** waveform amplitude samples (0..1) for voice messages */
+  w?: number[]
+  /** album group id — messages with the same g render as one gallery */
+  g?: string
+  /** sticker pack id (sticker kind) */
+  pk?: string
 }
 
 export function encodeMedia(m: MediaDescriptor): string {
@@ -38,7 +44,7 @@ export function decodeMedia(text: string): MediaDescriptor | null {
       typeof parsed === 'object' &&
       typeof parsed.kind === 'string' &&
       typeof parsed.u === 'string' &&
-      ['voice', 'image', 'video', 'file'].includes(parsed.kind)
+      ['voice', 'image', 'video', 'file', 'sticker', 'video-circle'].includes(parsed.kind)
     ) {
       return parsed as MediaDescriptor
     }
