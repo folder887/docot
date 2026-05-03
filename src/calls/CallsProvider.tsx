@@ -414,6 +414,23 @@ export function CallsProvider({ children }: { children: ReactNode }) {
     incomingOfferRef.current = null
     try {
       const stream = await acquireMedia(cur.media)
+      // Same race as startCall: while the user was clicking through the
+      // browser permission prompt the caller could have sent
+      // `call:cancel` / `call:end`, which moved us to `ended`. Bail out
+      // (and free the just-opened mic/camera) instead of answering into
+      // the void and leaving the callee stuck on "Connecting…".
+      if (stateRef.current.kind !== 'incoming') {
+        for (const tr of stream.getTracks()) {
+          try {
+            tr.stop()
+          } catch {
+            /* ignore */
+          }
+        }
+        localStreamRef.current = null
+        setLocalStream(null)
+        return
+      }
       const pc = buildPC(cur.peerId, cur.callId)
       for (const track of stream.getTracks()) pc.addTrack(track, stream)
       await pc.setRemoteDescription({ type: 'offer', sdp: offer.sdp })
