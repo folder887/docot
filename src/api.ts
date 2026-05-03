@@ -163,6 +163,24 @@ export type ApiInviteRequest = {
   createdAt: number
 }
 
+export type ApiSticker = {
+  id: string
+  packId: string
+  url: string
+  emoji: string
+  createdAt: number
+}
+
+export type ApiStickerPack = {
+  id: string
+  creatorId: string
+  title: string
+  coverEmoji: string
+  public: boolean
+  createdAt: number
+  stickers: ApiSticker[]
+}
+
 export type ApiChatMember = {
   userId: string
   role: 'owner' | 'admin' | 'member'
@@ -506,6 +524,26 @@ export const api = {
       `/chats/${encodeURIComponent(chatId)}/invite-requests/${requestId}`,
       { method: 'POST', body: JSON.stringify({ approve }) },
     ),
+  listStickerPacks: () => request<ApiStickerPack[]>(`/stickers/packs`),
+  createStickerPack: (title: string, coverEmoji: string = '🟩') =>
+    request<ApiStickerPack>(`/stickers/packs`, {
+      method: 'POST',
+      body: JSON.stringify({ title, coverEmoji }),
+    }),
+  addSticker: (packId: string, url: string, emoji: string = '') =>
+    request<ApiSticker>(`/stickers/packs/${encodeURIComponent(packId)}/stickers`, {
+      method: 'POST',
+      body: JSON.stringify({ url, emoji }),
+    }),
+  removeSticker: (packId: string, stickerId: string) =>
+    request<{ ok: boolean }>(
+      `/stickers/packs/${encodeURIComponent(packId)}/stickers/${encodeURIComponent(stickerId)}`,
+      { method: 'DELETE' },
+    ),
+  removeStickerPack: (packId: string) =>
+    request<{ ok: boolean }>(`/stickers/packs/${encodeURIComponent(packId)}`, {
+      method: 'DELETE',
+    }),
   revokeInvite: (token: string) =>
     request<{ ok: boolean }>(`/invites/${encodeURIComponent(token)}`, { method: 'DELETE' }),
   getInviteInfo: (token: string) =>

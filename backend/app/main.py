@@ -24,6 +24,7 @@ from .routers import (
     polls,
     posts,
     reports,
+    stickers,
     uploads,
     users,
 )
@@ -200,6 +201,7 @@ def create_app() -> FastAPI:
     app.include_router(link_preview.router)
     app.include_router(reports.router)
     app.include_router(calls.router)
+    app.include_router(stickers.router)
     return app
 
 

@@ -17,6 +17,8 @@ import {
 } from './Icons'
 import { api } from '../api'
 import { encodeMedia, type MediaDescriptor } from '../messageMedia'
+import { maybeCompressImage } from '../mediaCompress'
+import { StickerPicker } from './StickerPicker'
 import { t } from '../i18n'
 import { useApp } from '../store'
 import { showToast } from './Toast'
@@ -87,6 +89,27 @@ function wrapColor(textarea: HTMLTextAreaElement, color: string): { value: strin
   const wrapped = `[${color}:${sel}]`
   const next = `${before}${wrapped}${after}`
   return { value: next, start: s + color.length + 2, end: s + color.length + 2 + sel.length }
+}
+
+/** Reduce a long sequence of mic-amplitude samples to `target` bins by
+ *  taking the peak of each bucket. Cheap, perceptually adequate for a
+ *  voice-message bar visualisation. */
+function downsampleWaveform(samples: number[], target: number): number[] {
+  if (!samples || samples.length === 0) return []
+  if (samples.length <= target) return samples.map((v) => Math.max(0, Math.min(1, v)))
+  const out = new Array<number>(target).fill(0)
+  const ratio = samples.length / target
+  for (let i = 0; i < target; i++) {
+    const start = Math.floor(i * ratio)
+    const end = Math.min(samples.length, Math.floor((i + 1) * ratio))
+    let peak = 0
+    for (let j = start; j < end; j++) {
+      const v = Math.abs(samples[j] || 0)
+      if (v > peak) peak = v
+    }
+    out[i] = Math.max(0, Math.min(1, peak))
+  }
+  return out
 }
 
 function fmt(s: number): string {
@@ -160,6 +183,7 @@ export function ChatComposer({
   const [uploading, setUploading] = useState(false)
   const [attachOpen, setAttachOpen] = useState(false)
   const [pollOpen, setPollOpen] = useState(false)
+  const [stickerOpen, setStickerOpen] = useState(false)
   const [formatOpen, setFormatOpen] = useState(false)
   const taRef = useRef<HTMLTextAreaElement>(null)
   const recorderRef = useRef<MediaRecorder | null>(null)
@@ -168,6 +192,14 @@ export function ChatComposer({
   const fileRef = useRef<HTMLInputElement>(null)
   const startedAtRef = useRef<number>(0)
   const cancelledRef = useRef<boolean>(false)
+  // Live waveform during recording (last ~2s) and the full sample buffer
+  // we'll attach to the outgoing voice message.
+  const audioCtxRef = useRef<AudioContext | null>(null)
+  const audioSourceRef = useRef<MediaStreamAudioSourceNode | null>(null)
+  const analyserRef = useRef<AnalyserNode | null>(null)
+  const waveSamplesRef = useRef<number[]>([])
+  const waveTickRef = useRef<number | null>(null)
+  const [liveWave, setLiveWave] = useState<number[]>([])
 
   useEffect(() => {
     return () => {
@@ -244,11 +276,51 @@ export function ChatComposer({
       recorderRef.current = rec
       chunksRef.current = []
       cancelledRef.current = false
+      // Wire an AnalyserNode in parallel so we can sample the live mic
+      // amplitude every 80ms — used both for the live progress bars and
+      // for the persisted waveform shipped with the voice message.
+      try {
+        const Ctor: typeof AudioContext =
+          window.AudioContext ||
+          (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+        const ctx = new Ctor()
+        audioCtxRef.current = ctx
+        const src = ctx.createMediaStreamSource(stream)
+        audioSourceRef.current = src
+        const analyser = ctx.createAnalyser()
+        analyser.fftSize = 1024
+        analyserRef.current = analyser
+        src.connect(analyser)
+        const buf = new Uint8Array(analyser.fftSize)
+        waveSamplesRef.current = []
+        setLiveWave([])
+        waveTickRef.current = window.setInterval(() => {
+          analyser.getByteTimeDomainData(buf)
+          // Peak deviation from the 128 silence midpoint, normalised to 0..1.
+          let peak = 0
+          for (let i = 0; i < buf.length; i++) {
+            const v = Math.abs(buf[i] - 128)
+            if (v > peak) peak = v
+          }
+          const norm = Math.min(1, peak / 128)
+          waveSamplesRef.current.push(norm)
+          // Keep the live preview to last ~32 samples (about 2.5s).
+          setLiveWave((prev) => {
+            const next = prev.length >= 32 ? prev.slice(prev.length - 31) : prev.slice()
+            next.push(norm)
+            return next
+          })
+        }, 80)
+      } catch (err) {
+        // Analyser is best-effort; recording still works without waveform.
+        console.warn('waveform capture unavailable', err)
+      }
       rec.ondataavailable = (ev) => {
         if (ev.data && ev.data.size > 0) chunksRef.current.push(ev.data)
       }
       rec.onstop = async () => {
         stream.getTracks().forEach((t) => t.stop())
+        teardownAnalyser()
         if (cancelledRef.current) {
           setRecState('idle')
           return
@@ -262,13 +334,22 @@ export function ChatComposer({
         setRecState('sending')
         try {
           const up = await api.uploadFile(blob, `voice-${Date.now()}.webm`)
-          const desc: MediaDescriptor = { kind: 'voice', u: up.url, t: up.type, s: up.size, d: dur }
+          const desc: MediaDescriptor = {
+            kind: 'voice',
+            u: up.url,
+            t: up.type,
+            s: up.size,
+            d: dur,
+            w: downsampleWaveform(waveSamplesRef.current, 48),
+          }
           onSend(encodeMedia(desc))
         } catch (err) {
           console.error('voice upload failed', err)
         } finally {
           setRecState('idle')
           setRecSeconds(0)
+          waveSamplesRef.current = []
+          setLiveWave([])
         }
       }
       startedAtRef.current = Date.now()
@@ -280,7 +361,27 @@ export function ChatComposer({
       }, 250)
     } catch (err) {
       console.error('mic denied', err)
+      teardownAnalyser()
       setRecState('idle')
+    }
+  }
+
+  function teardownAnalyser() {
+    if (waveTickRef.current) {
+      window.clearInterval(waveTickRef.current)
+      waveTickRef.current = null
+    }
+    try {
+      audioSourceRef.current?.disconnect()
+    } catch {
+      /* ignore */
+    }
+    audioSourceRef.current = null
+    analyserRef.current = null
+    const ctx = audioCtxRef.current
+    audioCtxRef.current = null
+    if (ctx && ctx.state !== 'closed') {
+      void ctx.close().catch(() => {})
     }
   }
 
@@ -298,26 +399,40 @@ export function ChatComposer({
   }
 
   async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
+    const files = Array.from(e.target.files ?? [])
     e.target.value = ''
-    if (file.size > 25 * 1024 * 1024) {
+    if (files.length === 0) return
+    // 25 MB hard cap per file; compression below may shrink images further.
+    const tooBig = files.find((f) => f.size > 25 * 1024 * 1024)
+    if (tooBig) {
       showToast(t('chat.fileTooLarge', state.lang), 'error')
       return
     }
     setUploading(true)
+    // Multiple images sent at once become an album: each is uploaded as a
+    // separate message, sharing one album id `g` so the renderer can stack
+    // them into a single bubble.
+    const allImages = files.length > 1 && files.every((f) => f.type.startsWith('image/'))
+    const albumId = allImages ? `g${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}` : undefined
     try {
-      const up = await api.uploadFile(file, file.name || 'file')
-      const isImage = up.type.startsWith('image/')
-      const isVideo = up.type.startsWith('video/')
-      const desc: MediaDescriptor = {
-        kind: isImage ? 'image' : isVideo ? 'video' : 'file',
-        u: up.url,
-        t: up.type,
-        n: file.name,
-        s: up.size,
+      for (const original of files) {
+        const file =
+          original.type.startsWith('image/')
+            ? await maybeCompressImage(original, state.prefs.mediaQuality)
+            : original
+        const up = await api.uploadFile(file, file.name || 'file')
+        const isImage = up.type.startsWith('image/')
+        const isVideo = up.type.startsWith('video/')
+        const desc: MediaDescriptor = {
+          kind: isImage ? 'image' : isVideo ? 'video' : 'file',
+          u: up.url,
+          t: up.type,
+          n: file.name,
+          s: up.size,
+        }
+        if (albumId && isImage) desc.g = albumId
+        onSend(encodeMedia(desc))
       }
-      onSend(encodeMedia(desc))
     } catch (err) {
       console.error('upload failed', err)
     } finally {
@@ -339,7 +454,15 @@ export function ChatComposer({
         <div className="flex flex-1 items-center gap-2 rounded-full border-2 border-ink bg-paper px-4 py-2.5">
           <span className="inline-block h-2.5 w-2.5 animate-pulse rounded-full bg-red-500" />
           <span className="text-sm font-bold tabular-nums">{fmt(recSeconds)}</span>
-          <span className="ml-2 truncate text-xs text-muted">{t('chat.recording', state.lang)}</span>
+          <div className="ml-2 flex h-6 flex-1 items-center gap-[2px] overflow-hidden">
+            {liveWave.map((v, i) => (
+              <span
+                key={i}
+                className="inline-block w-[3px] rounded-full bg-ink"
+                style={{ height: `${Math.max(8, Math.round(v * 100))}%` }}
+              />
+            ))}
+          </div>
         </div>
         <button
           type="button"
@@ -470,7 +593,14 @@ export function ChatComposer({
         </div>
       )}
       <form className="flex items-end gap-2 px-3 py-2" onSubmit={handleSubmit}>
-        <input ref={fileRef} type="file" hidden onChange={handleFile} accept="image/*,video/*,audio/*,application/pdf,text/plain" />
+        <input
+          ref={fileRef}
+          type="file"
+          hidden
+          multiple
+          onChange={handleFile}
+          accept="image/*,video/*,audio/*,application/pdf,text/plain"
+        />
         <div className="relative shrink-0">
           {attachOpen && (
             <>
@@ -490,6 +620,16 @@ export function ChatComposer({
                   }}
                 >
                   {t('chat.attach', state.lang)}
+                </button>
+                <button
+                  type="button"
+                  className="rounded-xl px-3 py-2 text-left hover:bg-ink/10"
+                  onClick={() => {
+                    setAttachOpen(false)
+                    setStickerOpen(true)
+                  }}
+                >
+                  {t('chat.sticker', state.lang)}
                 </button>
                 {chatId && (
                   <button
@@ -567,6 +707,11 @@ export function ChatComposer({
       {pollOpen && chatId && (
         <PollModal chatId={chatId} onClose={() => setPollOpen(false)} />
       )}
+      <StickerPicker
+        open={stickerOpen}
+        onClose={() => setStickerOpen(false)}
+        onPick={(text) => onSend(text)}
+      />
     </div>
   )
 }

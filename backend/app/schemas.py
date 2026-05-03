@@ -496,3 +496,31 @@ class InviteRequestDecideIn(BaseModel):
 
 
 AuthOut.model_rebuild()
+
+
+class StickerOut(BaseModel):
+    id: str
+    packId: str
+    url: str
+    emoji: str = ""
+    createdAt: int
+
+
+class StickerPackOut(BaseModel):
+    id: str
+    creatorId: str = ""
+    title: str
+    coverEmoji: str = "🟩"
+    public: bool = True
+    createdAt: int
+    stickers: list[StickerOut] = []
+
+
+class StickerPackCreateIn(BaseModel):
+    title: str = Field(min_length=1, max_length=80)
+    coverEmoji: str = Field(default="🟩", max_length=8)
+
+
+class StickerCreateIn(BaseModel):
+    url: str = Field(min_length=1, max_length=500)
+    emoji: str = Field(default="", max_length=8)

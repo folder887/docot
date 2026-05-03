@@ -12,7 +12,7 @@ function fmt(s: number): string {
   return `${m}:${ss.toString().padStart(2, '0')}`
 }
 
-function VoiceBubble({ url, dur }: { url: string; dur: number }) {
+function VoiceBubble({ url, dur, wave }: { url: string; dur: number; wave?: number[] }) {
   const audioRef = useRef<HTMLAudioElement>(null)
   const [playing, setPlaying] = useState(false)
   const [progress, setProgress] = useState(0)
@@ -59,9 +59,28 @@ function VoiceBubble({ url, dur }: { url: string; dur: number }) {
         {playing ? <IconPause size={16} /> : <IconPlay size={16} />}
       </button>
       <div className="flex flex-1 flex-col gap-1">
-        <div className="h-1.5 overflow-hidden rounded-full bg-current/20">
-          <div className="h-full bg-current" style={{ width: `${pct}%` }} />
-        </div>
+        {wave && wave.length > 0 ? (
+          <div className="relative flex h-7 items-center gap-[2px]">
+            {wave.map((v, i) => {
+              const playedThreshold = (i + 0.5) / wave.length
+              const played = playedThreshold * 100 <= pct
+              return (
+                <span
+                  key={i}
+                  className="inline-block w-[3px] flex-1 rounded-full"
+                  style={{
+                    height: `${Math.max(12, Math.round(v * 100))}%`,
+                    backgroundColor: played ? 'currentColor' : 'rgba(0,0,0,0.25)',
+                  }}
+                />
+              )
+            })}
+          </div>
+        ) : (
+          <div className="h-1.5 overflow-hidden rounded-full bg-current/20">
+            <div className="h-full bg-current" style={{ width: `${pct}%` }} />
+          </div>
+        )}
         <span className="text-[11px] tabular-nums opacity-80">{fmt(playing ? progress : duration)}</span>
       </div>
       <audio ref={audioRef} src={url} preload="metadata" />
@@ -111,7 +130,25 @@ export function MessageContent({ text, onMine = false }: { text: string; onMine?
   const media = decodeMedia(text)
   if (media) {
     const url = mediaUrl(media)
-    if (media.kind === 'voice') return <VoiceBubble url={url} dur={media.d ?? 0} />
+    if (media.kind === 'voice') return <VoiceBubble url={url} dur={media.d ?? 0} wave={media.w} />
+    if (media.kind === 'sticker')
+      return (
+        <img
+          src={url}
+          alt="sticker"
+          className="h-32 w-32 select-none object-contain"
+          draggable={false}
+        />
+      )
+    if (media.kind === 'video-circle')
+      return (
+        <video
+          src={url}
+          controls
+          className="h-48 w-48 rounded-full border-2 border-current object-cover"
+          preload="metadata"
+        />
+      )
     if (media.kind === 'image') return <ImageBubble url={url} alt={media.n} />
     if (media.kind === 'video') return <VideoBubble url={url} />
     if (media.kind === 'file') return <FileBubble url={url} name={media.n} size={media.s} />

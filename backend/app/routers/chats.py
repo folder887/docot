@@ -54,6 +54,29 @@ def _looks_like_link(text: str) -> bool:
     return bool(_LINK_RX.search(text or ""))
 
 
+def _media_kind(text: str) -> str | None:
+    """Best-effort sniff of the media kind embedded in a message payload.
+
+    The frontend ships media as a JSON object on the first line of the
+    message: `{"kind":"voice","u":"…",…}`. We don't fully parse it (the
+    payload may legitimately be plain text that happens to start with `{`),
+    just look for the leading kind tag with a tolerant regex.
+    """
+    if not text:
+        return None
+    s = text.lstrip()
+    if not s.startswith("{"):
+        # Legacy prefix form is still accepted for forward compatibility.
+        for k in ("voice", "sticker", "image", "video", "video-circle", "file", "media"):
+            if s.startswith(f"__{k}:"):
+                return "video" if k == "video-circle" else k
+        return None
+    m = re.match(r"\{\s*\"kind\"\s*:\s*\"([a-z\-]+)\"", s)
+    if not m:
+        return None
+    return m.group(1)
+
+
 def _enforce_content_gates(chat: Chat, text: str) -> None:
     """Reject messages whose payload violates an admin-set content gate.
 
@@ -61,16 +84,22 @@ def _enforce_content_gates(chat: Chat, text: str) -> None:
     cannot post benign text and then edit it into a banned format.
     """
     text_for_check = text or ""
-    if bool(getattr(chat, "ban_links", False)) and _looks_like_link(text_for_check):
-        raise HTTPException(status_code=403, detail="Links are not allowed in this chat")
-    if bool(getattr(chat, "ban_stickers", False)) and text_for_check.startswith("__sticker:"):
+    kind = _media_kind(text_for_check)
+    if bool(getattr(chat, "ban_stickers", False)) and kind == "sticker":
         raise HTTPException(status_code=403, detail="Stickers are not allowed in this chat")
-    if bool(getattr(chat, "ban_voice", False)) and text_for_check.startswith("__voice:"):
+    if bool(getattr(chat, "ban_voice", False)) and kind == "voice":
         raise HTTPException(status_code=403, detail="Voice messages are not allowed in this chat")
-    if bool(getattr(chat, "ban_media", False)) and text_for_check.startswith(
-        ("__media:", "__file:", "__image:", "__video:")
+    if bool(getattr(chat, "ban_media", False)) and kind in (
+        "image",
+        "video",
+        "video-circle",
+        "file",
+        "media",
     ):
         raise HTTPException(status_code=403, detail="Media is not allowed in this chat")
+    # Link check applies to any text payload (including captions on media).
+    if bool(getattr(chat, "ban_links", False)) and _looks_like_link(text_for_check):
+        raise HTTPException(status_code=403, detail="Links are not allowed in this chat")
 
 
 def _audit(

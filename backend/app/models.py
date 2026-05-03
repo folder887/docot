@@ -537,3 +537,36 @@ class InviteRequest(Base):
 
 Index("ix_admin_logs_chat_created", AdminLog.chat_id, AdminLog.created_at)
 Index("ix_topics_chat_last", Topic.chat_id, Topic.last_message_at)
+
+
+class StickerPack(Base):
+    """A named collection of stickers. Built-in packs are seeded by the
+    server (creator_id is empty); user-submitted packs reference their
+    author."""
+
+    __tablename__ = "sticker_packs"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: gen_id("sp_"))
+    creator_id: Mapped[str] = mapped_column(String, default="", index=True)
+    title: Mapped[str] = mapped_column(String(80))
+    cover_emoji: Mapped[str] = mapped_column(String(8), default="🟩")
+    public: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[int] = mapped_column(Integer, default=now_ms, index=True)
+
+
+class Sticker(Base):
+    """One sticker. `url` points at an image asset (webp/png) stored via
+    /uploads. `emoji` is the keyword shortcut used by the picker."""
+
+    __tablename__ = "stickers"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: gen_id("st_"))
+    pack_id: Mapped[str] = mapped_column(
+        String, ForeignKey("sticker_packs.id", ondelete="CASCADE"), index=True
+    )
+    url: Mapped[str] = mapped_column(String(500))
+    emoji: Mapped[str] = mapped_column(String(8), default="")
+    created_at: Mapped[int] = mapped_column(Integer, default=now_ms)
+
+
+Index("ix_stickers_pack", Sticker.pack_id)
