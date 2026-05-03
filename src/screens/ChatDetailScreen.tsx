@@ -13,6 +13,7 @@ import type { ApiReportIn } from '../api'
 import type { Message } from '../types'
 import { recallOutgoing } from '../crypto/outgoing'
 import { exportChatAsJSON } from '../util/exportChat'
+import { useCalls } from '../calls/CallsProvider'
 
 // Same six picks exposed by Telegram, Slack and Apple Messages: covers the
 // 80% case so most users never need to open a full picker.
@@ -41,6 +42,10 @@ export function ChatDetailScreen() {
   const peer = chat ? peerOf(chat) : null
   const endRef = useRef<HTMLDivElement>(null)
   const myId = state.me?.id
+  const calls = useCalls()
+  // Calls only target a single human peer — DMs with a real user (not Saved
+  // Messages and not bot DMs). Groups/channels would need an SFU.
+  const canCall = !!chat && chat.kind === 'dm' && !!peer && peer.kind !== 'bot' && peer.id !== myId
 
   const [actionFor, setActionFor] = useState<Message | null>(null)
   const [editing, setEditing] = useState<{ id: string; text: string } | null>(null)
@@ -233,15 +238,39 @@ export function ChatDetailScreen() {
           </button>
         }
         right={
-          <button
-            type="button"
-            onClick={() => exportChatAsJSON(chat, state.users)}
-            className="row-press rounded-full p-1.5 text-[10px] font-black"
-            aria-label={t('chat.export', state.lang)}
-            title={t('chat.export', state.lang)}
-          >
-            ⇩
-          </button>
+          <div className="flex items-center gap-1">
+            {canCall && peer && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => void calls.startCall(peer.id, 'audio')}
+                  className="row-press rounded-full p-1.5 text-base"
+                  aria-label={t('call.audio', state.lang)}
+                  title={t('call.audio', state.lang)}
+                >
+                  📞
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void calls.startCall(peer.id, 'video')}
+                  className="row-press rounded-full p-1.5 text-base"
+                  aria-label={t('call.video', state.lang)}
+                  title={t('call.video', state.lang)}
+                >
+                  📹
+                </button>
+              </>
+            )}
+            <button
+              type="button"
+              onClick={() => exportChatAsJSON(chat, state.users)}
+              className="row-press rounded-full p-1.5 text-[10px] font-black"
+              aria-label={t('chat.export', state.lang)}
+              title={t('chat.export', state.lang)}
+            >
+              ⇩
+            </button>
+          </div>
         }
       />
       <PinnedBar

@@ -13,6 +13,7 @@ from .db import Base, SessionLocal, engine
 from .models import Chat, Message, now_ms
 from .routers import (
     auth,
+    calls,
     chats,
     events,
     folders,
@@ -189,6 +190,7 @@ def create_app() -> FastAPI:
     app.include_router(uploads.router)
     app.include_router(link_preview.router)
     app.include_router(reports.router)
+    app.include_router(calls.router)
     return app
 
 

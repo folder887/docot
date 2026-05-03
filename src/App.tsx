@@ -23,6 +23,8 @@ import { TopBar } from './components/TopBar'
 import { ToastHost } from './components/Toast'
 import { PasscodeLockGate } from './components/PasscodeLockGate'
 import { ReleaseBanner } from './components/ReleaseBanner'
+import { CallsProvider } from './calls/CallsProvider'
+import { CallOverlay } from './calls/CallOverlay'
 
 const TOP_TAB_ROUTES = ['/chats', '/calendar', '/notes', '/news', '/menu']
 
@@ -144,11 +146,14 @@ function Guarded() {
 export default function App() {
   return (
     <AppProvider>
-      <ThemeSync />
-      <PasscodeLockGate>
-        <Guarded />
-      </PasscodeLockGate>
-      <ToastHost />
+      <CallsProvider>
+        <ThemeSync />
+        <PasscodeLockGate>
+          <Guarded />
+        </PasscodeLockGate>
+        <CallOverlay />
+        <ToastHost />
+      </CallsProvider>
     </AppProvider>
   )
 }
