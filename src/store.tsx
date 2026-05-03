@@ -22,6 +22,7 @@ import type {
   User,
 } from './types'
 import { defaultPrefs } from './types'
+import { extractMentions } from './lite-md'
 import { ensureIdentity } from './crypto/identity'
 import {
   encryptForUser,
@@ -1010,11 +1011,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // beeping on every chat open.
       const fromMe = state.me?.id === final.authorId
       const muted = !!chat?.muted
-      if (!alreadyInBuffer && !fromMe && !muted && !state.prefs.muteAll) {
+      // @-mentions break through chat mute (but still respect global mute):
+      // if the active user's handle is mentioned in the plaintext, notify
+      // even if they had silenced this chat — matches Telegram behaviour.
+      const myHandle = (state.me?.handle || '').toLowerCase()
+      const mentionedMe =
+        !!myHandle &&
+        !isEncryptedEnvelope(final.text) &&
+        extractMentions(final.text).includes(myHandle)
+      const shouldNotify =
+        !alreadyInBuffer &&
+        !fromMe &&
+        !state.prefs.muteAll &&
+        (!muted || mentionedMe)
+      if (shouldNotify) {
         if (state.prefs.sounds) ding()
         if (state.prefs.notifications && state.me) {
           const author = state.users[final.authorId]?.name ?? 'New message'
-          const body = isEncryptedEnvelope(final.text) ? '🔒 Encrypted' : final.text
+          const prefix = mentionedMe ? '@ ' : ''
+          const body = isEncryptedEnvelope(final.text)
+            ? '🔒 Encrypted'
+            : prefix + final.text
           desktopNotify(author, body)
         }
       }

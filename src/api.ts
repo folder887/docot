@@ -1,4 +1,4 @@
-const DEFAULT_API = 'https://docot-backend-ryhccesj.fly.dev'
+const DEFAULT_API = 'https://docot-backend-wvkjcktl.fly.dev'
 export const API_URL: string = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') || DEFAULT_API
 
 const TOKEN_KEY = 'docot:token'
@@ -562,6 +562,12 @@ export const api = {
   /** All known device bundles for a user; senders fan out one envelope per device. */
   listUserDevices: (userId: string) =>
     request<ApiDeviceList>(`/keys/devices/${encodeURIComponent(userId)}`),
+  /** Revoke one of the caller's own Signal device bundles (remote logout). */
+  revokeOwnDevice: (deviceId: number) =>
+    request<{ ok: boolean; deviceId: number }>(
+      `/keys/devices/${deviceId}`,
+      { method: 'DELETE' },
+    ),
   getKeyBundleForDevice: (userId: string, deviceId: number) =>
     request<ApiKeyBundle>(
       `/keys/bundle/${encodeURIComponent(userId)}/${deviceId}`,
@@ -582,7 +588,32 @@ export const api = {
     if (!res.ok) throw new ApiError(res.status, res.statusText)
     return (await res.json()) as ApiUpload
   },
+
+  // Link previews — server-side OpenGraph scrape with SSRF protection.
+  linkPreview: (url: string) =>
+    request<ApiLinkPreview>(`/link-preview?url=${encodeURIComponent(url)}`),
+
+  // Abuse reports — fire-and-forget, server stores for moderator review.
+  report: (body: ApiReportIn) =>
+    request<ApiReportOut>('/reports', { method: 'POST', body: JSON.stringify(body) }),
 }
+
+export type ApiLinkPreview = {
+  url: string
+  finalUrl: string
+  title: string
+  description: string
+  image: string
+  siteName: string
+}
+
+export type ApiReportIn = {
+  subjectKind: 'user' | 'message' | 'chat' | 'post' | 'comment'
+  subjectId: string
+  reason: 'spam' | 'abuse' | 'illegal' | 'impersonation' | 'other'
+  note?: string
+}
+export type ApiReportOut = { id: string; status: string }
 
 export type ApiOneTimePreKey = { keyId: number; publicKey: string }
 export type ApiKeyBundleIn = {

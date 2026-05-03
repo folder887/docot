@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { decodeMedia, mediaUrl } from '../messageMedia'
 import { LiteMarkdown } from '../lite-md'
 import { IconPause, IconPlay } from './Icons'
+import { LinkPreview, firstUrl } from './LinkPreview'
 import { PollCard } from './PollCard'
 
 function fmt(s: number): string {
@@ -115,9 +116,15 @@ export function MessageContent({ text, onMine = false }: { text: string; onMine?
     if (media.kind === 'video') return <VideoBubble url={url} />
     if (media.kind === 'file') return <FileBubble url={url} name={media.n} size={media.s} />
   }
+  // Render an inline link preview for the first URL in the text — keeps
+  // bubbles compact and avoids 5 previews on a paste of 5 links.
+  const url = firstUrl(text)
   return (
-    <p className="whitespace-pre-wrap break-words">
-      <LiteMarkdown text={text} />
-    </p>
+    <>
+      <p className="whitespace-pre-wrap break-words">
+        <LiteMarkdown text={text} />
+      </p>
+      {url && <LinkPreview url={url} />}
+    </>
   )
 }

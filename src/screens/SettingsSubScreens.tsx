@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useApp } from '../store'
 import { t } from '../i18n'
@@ -796,14 +796,23 @@ function DevicesList({ userId }: { userId: string | null }) {
   const [items, setItems] = useState<{ deviceId: number; registrationId: number; updatedAt: number }[]>([])
   const [loading, setLoading] = useState(true)
   const [myDevice, setMyDevice] = useState<number | null>(null)
+  const [pending, setPending] = useState<number | null>(null)
+  const refresh = useCallback(async () => {
+    if (!userId) return
+    try {
+      const mod = await import('../api')
+      const list = await mod.api.listUserDevices(userId)
+      setItems(list.devices ?? [])
+    } catch {
+      /* ignore */
+    }
+  }, [userId])
   useEffect(() => {
     if (!userId) return
     let cancelled = false
     void (async () => {
       try {
-        const mod = await import('../api')
-        const list = await mod.api.listUserDevices(userId)
-        if (!cancelled) setItems(list.devices ?? [])
+        await refresh()
         try {
           const id = await import('../crypto/identity')
           const did = await id.localDeviceId()
@@ -811,8 +820,6 @@ function DevicesList({ userId }: { userId: string | null }) {
         } catch {
           /* ignore */
         }
-      } catch {
-        /* ignore */
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -820,7 +827,20 @@ function DevicesList({ userId }: { userId: string | null }) {
     return () => {
       cancelled = true
     }
-  }, [userId])
+  }, [userId, refresh])
+  const revoke = async (deviceId: number) => {
+    if (!confirm(`Revoke device #${deviceId}? It will stop receiving new messages.`)) return
+    setPending(deviceId)
+    try {
+      const mod = await import('../api')
+      await mod.api.revokeOwnDevice(deviceId)
+      await refresh()
+    } catch {
+      /* ignore */
+    } finally {
+      setPending(null)
+    }
+  }
   if (!userId) return null
   if (loading) return <div className="text-muted">…</div>
   if (items.length === 0) return <div className="text-muted">—</div>
@@ -829,9 +849,9 @@ function DevicesList({ userId }: { userId: string | null }) {
       {items.map((d) => (
         <li
           key={d.deviceId}
-          className="flex items-center justify-between rounded-2xl border-2 border-ink px-3 py-2"
+          className="flex items-center justify-between gap-2 rounded-2xl border-2 border-ink px-3 py-2"
         >
-          <div>
+          <div className="min-w-0">
             <div className="font-bold">
               Device #{d.deviceId}
               {myDevice === d.deviceId && (
@@ -843,6 +863,16 @@ function DevicesList({ userId }: { userId: string | null }) {
               {new Date(d.updatedAt).toLocaleString()}
             </div>
           </div>
+          {myDevice !== d.deviceId && (
+            <button
+              type="button"
+              onClick={() => revoke(d.deviceId)}
+              disabled={pending === d.deviceId}
+              className="rounded-xl border-2 border-ink px-2 py-1 text-[11px] font-bold disabled:opacity-40"
+            >
+              {pending === d.deviceId ? '…' : 'Revoke'}
+            </button>
+          )}
         </li>
       ))}
     </ul>

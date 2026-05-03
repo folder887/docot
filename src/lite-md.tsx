@@ -21,6 +21,7 @@ type Token =
   | { type: 'link'; href: string; children: Token[] }
   | { type: 'highlight'; children: Token[] }
   | { type: 'color'; color: string; children: Token[] }
+  | { type: 'mention'; handle: string }
 
 const ALLOWED_COLORS = new Set([
   'red',
@@ -133,6 +134,20 @@ function tokenize(input: string): Token[] {
         }
       }
     }
+    // @-mention: @handle (3..32 chars, [a-z0-9_]). Require a non-word char
+    // before the @ so we don't mistake "email@domain" for a mention.
+    if (c === '@') {
+      const prev = i === 0 ? '' : input[i - 1]
+      if (!prev || /[^\w]/.test(prev)) {
+        const m = /^@([a-z0-9_]{3,32})/i.exec(input.slice(i))
+        if (m) {
+          flush()
+          out.push({ type: 'mention', handle: m[1].toLowerCase() })
+          i += m[0].length
+          continue
+        }
+      }
+    }
     // bare URL autolink
     if ((c === 'h' || c === 'H') && /^https?:\/\//i.test(input.slice(i))) {
       const m = /^https?:\/\/[^\s<>"']+/.exec(input.slice(i))
@@ -203,8 +218,32 @@ function renderTokens(tokens: Token[], keyPrefix = ''): ReactNode[] {
             {renderTokens(tok.children, k + '-')}
           </a>
         )
+      case 'mention':
+        return (
+          <a
+            key={k}
+            href={`/u/${tok.handle}`}
+            className="font-bold underline decoration-current underline-offset-2"
+          >
+            @{tok.handle}
+          </a>
+        )
     }
   })
+}
+
+/** Extract all @handles referenced in a piece of text. Uses the same
+ * tokenizer so mentions inside code spans / links / etc. don't leak. */
+export function extractMentions(text: string): string[] {
+  const seen = new Set<string>()
+  const walk = (toks: Token[]): void => {
+    for (const t of toks) {
+      if (t.type === 'mention') seen.add(t.handle)
+      else if ('children' in t) walk(t.children)
+    }
+  }
+  walk(tokenize(text))
+  return [...seen]
 }
 
 type Block =
