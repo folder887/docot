@@ -96,6 +96,11 @@ type Ctx = {
       subscribersOnly?: boolean
       signedPosts?: boolean
       autoDeleteSeconds?: number
+      banMedia?: boolean
+      banVoice?: boolean
+      banStickers?: boolean
+      banLinks?: boolean
+      topicsEnabled?: boolean
     },
   ) => Promise<void>
   pinChat: (chatId: string, pinned: boolean) => Promise<void>
@@ -191,6 +196,7 @@ function msgFromApi(m: ApiMessage): Message {
     sealed: m.sealed ?? false,
     pinned: m.pinned ?? false,
     pinnedAt: m.pinnedAt ?? null,
+    topicId: m.topicId ?? null,
     reactions: m.reactions ?? [],
   }
 }
@@ -330,6 +336,11 @@ function chatFromApi(c: ApiChat, meId?: string): Chat {
     subscribersOnly: !!c.subscribersOnly,
     signedPosts: !!c.signedPosts,
     autoDeleteSeconds: c.autoDeleteSeconds ?? 0,
+    banMedia: !!c.banMedia,
+    banVoice: !!c.banVoice,
+    banStickers: !!c.banStickers,
+    banLinks: !!c.banLinks,
+    topicsEnabled: !!c.topicsEnabled,
     createdBy: c.createdBy,
     participants: c.participants,
     messages: c.messages.map((m) => fixSealed(msgFromApi(m))),
@@ -898,6 +909,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         subscribersOnly?: boolean
         signedPosts?: boolean
         autoDeleteSeconds?: number
+        banMedia?: boolean
+        banVoice?: boolean
+        banStickers?: boolean
+        banLinks?: boolean
+        topicsEnabled?: boolean
       },
     ) => {
       const updated = chatFromApi(await api.patchChat(chatId, patch), state.me?.id)

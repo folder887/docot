@@ -75,6 +75,14 @@ class Chat(Base):
     # Per-chat retention. Messages older than this are tomb-stoned by the
     # `purge_expired_messages` background task. 0 disables auto-delete.
     auto_delete_seconds: Mapped[int] = mapped_column(Integer, default=0)
+    # Per-chat content gates set by admins. Each blocks a category of
+    # message client-side hint + server-side enforcement on POST.
+    ban_media: Mapped[bool] = mapped_column(Boolean, default=False)
+    ban_voice: Mapped[bool] = mapped_column(Boolean, default=False)
+    ban_stickers: Mapped[bool] = mapped_column(Boolean, default=False)
+    ban_links: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Topics (threads) feature switch — admins enable per group/channel.
+    topics_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     created_by: Mapped[str] = mapped_column(String, ForeignKey("users.id"))
     created_at: Mapped[int] = mapped_column(Integer, default=now_ms)
     updated_at: Mapped[int] = mapped_column(Integer, default=now_ms)
@@ -123,6 +131,10 @@ class Message(Base):
     # message in the API; the client renders a pinned-bar header.
     pinned: Mapped[bool] = mapped_column(Boolean, default=False)
     pinned_at: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
+    # Optional thread/topic the message belongs to. Null = main chat feed.
+    topic_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("topics.id", ondelete="SET NULL"), nullable=True, default=None, index=True
+    )
 
     chat: Mapped[Chat] = relationship(back_populates="messages")
 
@@ -283,6 +295,10 @@ class ChatInvite(Base):
     max_uses: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
     uses: Mapped[int] = mapped_column(Integer, default=0)
     revoked: Mapped[bool] = mapped_column(Boolean, default=False)
+    # When true, redeeming the link creates an InviteRequest in `pending`
+    # state; an admin must approve before the user joins.
+    require_approval: Mapped[bool] = mapped_column(Boolean, default=False)
+    name: Mapped[str] = mapped_column(String(80), default="")
 
 
 class PostMedia(Base):
@@ -451,3 +467,73 @@ class Report(Base):
 
 
 Index("ix_messages_chat_created", Message.chat_id, Message.created_at)
+
+
+class Topic(Base):
+    """Threaded sub-conversation inside a group/channel chat.
+
+    The `topic_id` foreign key on Message lets a single chat carry many
+    independent threads (akin to Telegram's group topics or Slack's
+    threads). The "main" feed of a chat is messages with topic_id = NULL.
+    """
+
+    __tablename__ = "topics"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: gen_id("t_"))
+    chat_id: Mapped[str] = mapped_column(
+        String, ForeignKey("chats.id", ondelete="CASCADE"), index=True
+    )
+    title: Mapped[str] = mapped_column(String(120), default="")
+    icon: Mapped[str] = mapped_column(String(8), default="")  # one emoji char
+    created_by: Mapped[str] = mapped_column(String, ForeignKey("users.id"))
+    created_at: Mapped[int] = mapped_column(Integer, default=now_ms, index=True)
+    closed: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_message_at: Mapped[int] = mapped_column(Integer, default=now_ms, index=True)
+
+
+class AdminLog(Base):
+    """Append-only journal of moderator actions inside a chat.
+
+    Visible only to admins/owners. Captures the action verb, actor,
+    target (user/message/chat), and an opaque JSON payload describing
+    what changed (old → new role, kicked user, etc.).
+    """
+
+    __tablename__ = "admin_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    chat_id: Mapped[str] = mapped_column(
+        String, ForeignKey("chats.id", ondelete="CASCADE"), index=True
+    )
+    actor_id: Mapped[str] = mapped_column(String, ForeignKey("users.id"))
+    target_kind: Mapped[str] = mapped_column(String(16), default="")  # user|message|chat|topic|invite
+    target_id: Mapped[str] = mapped_column(String(64), default="")
+    action: Mapped[str] = mapped_column(String(32), index=True)
+    payload: Mapped[str] = mapped_column(Text, default="")  # JSON string
+    created_at: Mapped[int] = mapped_column(Integer, default=now_ms, index=True)
+
+
+class InviteRequest(Base):
+    """Pending join request for an invite link with require_approval=True."""
+
+    __tablename__ = "invite_requests"
+    __table_args__ = (UniqueConstraint("chat_id", "user_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    chat_id: Mapped[str] = mapped_column(
+        String, ForeignKey("chats.id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[str] = mapped_column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    invite_token: Mapped[str] = mapped_column(String(32), default="")
+    note: Mapped[str] = mapped_column(String(280), default="")
+    created_at: Mapped[int] = mapped_column(Integer, default=now_ms, index=True)
+    # "pending" | "approved" | "denied"
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
+    decided_by: Mapped[str] = mapped_column(String, default="")
+    decided_at: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
+
+
+Index("ix_admin_logs_chat_created", AdminLog.chat_id, AdminLog.created_at)
+Index("ix_topics_chat_last", Topic.chat_id, Topic.last_message_at)

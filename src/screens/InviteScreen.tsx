@@ -4,7 +4,7 @@ import { useApp } from '../store'
 import { t } from '../i18n'
 import { ScreenHeader } from '../components/ScreenHeader'
 import { Avatar } from '../components/Avatar'
-import { api, type ApiInviteInfo } from '../api'
+import { api, ApiError, type ApiInviteInfo } from '../api'
 
 export function InviteScreen() {
   const { token } = useParams<{ token: string }>()
@@ -14,6 +14,7 @@ export function InviteScreen() {
   const [loading, setLoading] = useState(true)
   const [joining, setJoining] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [pending, setPending] = useState(false)
 
   useEffect(() => {
     if (!token) return
@@ -43,8 +44,12 @@ export function InviteScreen() {
       const chat = await api.joinViaInvite(token)
       await refresh()
       navigate(`/chats/${chat.id}`)
-    } catch {
-      setError('join-failed')
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 403 && e.message === 'approval-required') {
+        setPending(true)
+      } else {
+        setError('join-failed')
+      }
     } finally {
       setJoining(false)
     }
@@ -76,13 +81,19 @@ export function InviteScreen() {
                 {t('invite.joinAs', state.lang)} <strong>@{state.me.handle}</strong>
               </p>
             )}
-            <button
-              onClick={onJoin}
-              disabled={joining}
-              className="bw-btn-primary mt-2 w-full disabled:opacity-50"
-            >
-              {joining ? t('common.loading', state.lang) : t('invite.join', state.lang)}
-            </button>
+            {pending ? (
+              <p className="rounded-2xl border-2 border-ink bg-paper-soft px-4 py-3 text-center text-sm font-bold">
+                {t('invite.pendingApproval', state.lang)}
+              </p>
+            ) : (
+              <button
+                onClick={onJoin}
+                disabled={joining}
+                className="bw-btn-primary mt-2 w-full disabled:opacity-50"
+              >
+                {joining ? t('common.loading', state.lang) : t('invite.join', state.lang)}
+              </button>
+            )}
           </>
         )}
         {info && !info.valid && (

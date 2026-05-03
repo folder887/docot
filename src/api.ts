@@ -102,6 +102,7 @@ export type ApiMessage = {
   sealed?: boolean
   pinned?: boolean
   pinnedAt?: number | null
+  topicId?: string | null
   reactions?: ApiReactionAgg[]
 }
 
@@ -115,6 +116,11 @@ export type ApiChat = {
   subscribersOnly?: boolean
   signedPosts?: boolean
   autoDeleteSeconds?: number
+  banMedia?: boolean
+  banVoice?: boolean
+  banStickers?: boolean
+  banLinks?: boolean
+  topicsEnabled?: boolean
   createdBy?: string
   participants: string[]
   pinned: boolean
@@ -123,6 +129,38 @@ export type ApiChat = {
   updatedAt: number
   lastMessage: ApiMessage | null
   messages: ApiMessage[]
+}
+
+export type ApiTopic = {
+  id: string
+  chatId: string
+  title: string
+  icon: string
+  createdBy: string
+  createdAt: number
+  closed: boolean
+  lastMessageAt: number
+}
+
+export type ApiAdminLog = {
+  id: number
+  chatId: string
+  actorId: string
+  targetKind: string
+  targetId: string
+  action: string
+  payload: Record<string, string | number | boolean | null>
+  createdAt: number
+}
+
+export type ApiInviteRequest = {
+  id: number
+  chatId: string
+  userId: string
+  inviteToken: string
+  note: string
+  status: 'pending' | 'approved' | 'denied'
+  createdAt: number
 }
 
 export type ApiChatMember = {
@@ -140,6 +178,8 @@ export type ApiInvite = {
   maxUses: number | null
   uses: number
   revoked: boolean
+  requireApproval?: boolean
+  name?: string
   url: string
 }
 
@@ -151,6 +191,7 @@ export type ApiInviteInfo = {
   description: string
   memberCount: number
   valid: boolean
+  requireApproval?: boolean
 }
 
 export type ApiPostMedia = {
@@ -312,6 +353,11 @@ export const api = {
       subscribersOnly?: boolean
       signedPosts?: boolean
       autoDeleteSeconds?: number
+      banMedia?: boolean
+      banVoice?: boolean
+      banStickers?: boolean
+      banLinks?: boolean
+      topicsEnabled?: boolean
     },
   ) =>
     request<ApiChat>(`/chats/${encodeURIComponent(chatId)}`, {
@@ -320,7 +366,7 @@ export const api = {
     }),
   sendMessage: (
     chatId: string,
-    body: { text: string; replyToId?: string | null; sealed?: boolean },
+    body: { text: string; replyToId?: string | null; sealed?: boolean; topicId?: string | null },
   ) =>
     request<ApiMessage>(`/chats/${encodeURIComponent(chatId)}/messages`, {
       method: 'POST',
@@ -408,11 +454,58 @@ export const api = {
   // invites
   listInvites: (chatId: string) =>
     request<ApiInvite[]>(`/chats/${encodeURIComponent(chatId)}/invites`),
-  createInvite: (chatId: string, body?: { expiresAt?: number; maxUses?: number }) =>
+  createInvite: (
+    chatId: string,
+    body?: {
+      expiresAt?: number
+      maxUses?: number
+      requireApproval?: boolean
+      name?: string
+    },
+  ) =>
     request<ApiInvite>(`/chats/${encodeURIComponent(chatId)}/invites`, {
       method: 'POST',
       body: JSON.stringify(body ?? {}),
     }),
+  // Topics
+  listTopics: (chatId: string) =>
+    request<ApiTopic[]>(`/chats/${encodeURIComponent(chatId)}/topics`),
+  createTopic: (chatId: string, title: string, icon: string = '') =>
+    request<ApiTopic>(`/chats/${encodeURIComponent(chatId)}/topics`, {
+      method: 'POST',
+      body: JSON.stringify({ title, icon }),
+    }),
+  patchTopic: (
+    chatId: string,
+    topicId: string,
+    patch: { title?: string; icon?: string; closed?: boolean },
+  ) =>
+    request<ApiTopic>(
+      `/chats/${encodeURIComponent(chatId)}/topics/${encodeURIComponent(topicId)}`,
+      { method: 'PATCH', body: JSON.stringify(patch) },
+    ),
+  deleteTopic: (chatId: string, topicId: string) =>
+    request<{ ok: boolean }>(
+      `/chats/${encodeURIComponent(chatId)}/topics/${encodeURIComponent(topicId)}`,
+      { method: 'DELETE' },
+    ),
+  // Admin log
+  listAdminLog: (chatId: string, before?: number) => {
+    const qs = before != null ? `?before=${before}` : ''
+    return request<ApiAdminLog[]>(
+      `/chats/${encodeURIComponent(chatId)}/admin-log${qs}`,
+    )
+  },
+  // Invite approval queue
+  listInviteRequests: (chatId: string) =>
+    request<ApiInviteRequest[]>(
+      `/chats/${encodeURIComponent(chatId)}/invite-requests`,
+    ),
+  decideInviteRequest: (chatId: string, requestId: number, approve: boolean) =>
+    request<ApiInviteRequest>(
+      `/chats/${encodeURIComponent(chatId)}/invite-requests/${requestId}`,
+      { method: 'POST', body: JSON.stringify({ approve }) },
+    ),
   revokeInvite: (token: string) =>
     request<{ ok: boolean }>(`/invites/${encodeURIComponent(token)}`, { method: 'DELETE' }),
   getInviteInfo: (token: string) =>

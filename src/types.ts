@@ -68,6 +68,8 @@ export type Message = {
   sealed?: boolean
   pinned?: boolean
   pinnedAt?: number | null
+  /** Optional thread/topic id when posted into a sub-thread. */
+  topicId?: string | null
   reactions?: ReactionAgg[]
 }
 
@@ -83,6 +85,13 @@ export type Chat = {
   subscribersOnly?: boolean
   signedPosts?: boolean
   autoDeleteSeconds?: number
+  /** Admin content gates (server enforces these on POST too). */
+  banMedia?: boolean
+  banVoice?: boolean
+  banStickers?: boolean
+  banLinks?: boolean
+  /** When true, threads (Topics) are available inside this chat. */
+  topicsEnabled?: boolean
   createdBy?: string
   participants: string[]
   messages: Message[]
@@ -167,6 +176,38 @@ export type ChatFolder = {
   name: string
   sortOrder: number
   chatIds: string[]
+}
+
+export type Topic = {
+  id: string
+  chatId: string
+  title: string
+  icon: string
+  createdBy: string
+  createdAt: number
+  closed: boolean
+  lastMessageAt: number
+}
+
+export type AdminLogEntry = {
+  id: number
+  chatId: string
+  actorId: string
+  targetKind: string
+  targetId: string
+  action: string
+  payload: Record<string, string | number | boolean | null>
+  createdAt: number
+}
+
+export type InviteRequest = {
+  id: number
+  chatId: string
+  userId: string
+  inviteToken: string
+  note: string
+  status: 'pending' | 'approved' | 'denied'
+  createdAt: number
 }
 
 export const defaultPrefs: Prefs = {

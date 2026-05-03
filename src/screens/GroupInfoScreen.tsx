@@ -17,7 +17,14 @@ import {
   IconCheck,
   IconCopy,
 } from '../components/Icons'
-import { api, type ApiChatMember, type ApiInvite } from '../api'
+import {
+  api,
+  type ApiAdminLog,
+  type ApiChatMember,
+  type ApiInvite,
+  type ApiInviteRequest,
+  type ApiTopic,
+} from '../api'
 import type { Chat, ChatRole, User } from '../types'
 
 export function GroupInfoScreen() {
@@ -44,6 +51,12 @@ export function GroupInfoScreen() {
   const [showInvites, setShowInvites] = useState(false)
   const [inviteToShare, setInviteToShare] = useState<ApiInvite | null>(null)
   const [showAddMember, setShowAddMember] = useState(false)
+  const [showAdminLog, setShowAdminLog] = useState(false)
+  const [adminLog, setAdminLog] = useState<ApiAdminLog[]>([])
+  const [showRequests, setShowRequests] = useState(false)
+  const [joinRequests, setJoinRequests] = useState<ApiInviteRequest[]>([])
+  const [showTopics, setShowTopics] = useState(false)
+  const [topics, setTopics] = useState<ApiTopic[]>([])
 
   const role = chat?.role ?? 'member'
   const isAdmin = role === 'owner' || role === 'admin'
@@ -69,6 +82,33 @@ export function GroupInfoScreen() {
     }
   }, [id, isAdmin])
 
+  const reloadAdminLog = useCallback(async () => {
+    if (!id || !isAdmin) return
+    try {
+      setAdminLog(await api.listAdminLog(id))
+    } catch {
+      /* ignore */
+    }
+  }, [id, isAdmin])
+
+  const reloadJoinRequests = useCallback(async () => {
+    if (!id || !isAdmin) return
+    try {
+      setJoinRequests(await api.listInviteRequests(id))
+    } catch {
+      /* ignore */
+    }
+  }, [id, isAdmin])
+
+  const reloadTopics = useCallback(async () => {
+    if (!id || !chat?.topicsEnabled) return
+    try {
+      setTopics(await api.listTopics(id))
+    } catch {
+      /* ignore */
+    }
+  }, [id, chat?.topicsEnabled])
+
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void reloadMembers()
@@ -78,6 +118,16 @@ export function GroupInfoScreen() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void reloadInvites()
   }, [reloadInvites])
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void reloadJoinRequests()
+  }, [reloadJoinRequests])
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void reloadTopics()
+  }, [reloadTopics])
 
   if (!chat) {
     return (
@@ -206,6 +256,50 @@ export function GroupInfoScreen() {
         </div>
       )}
 
+      {chat.topicsEnabled && (
+        <div className="mx-4 mt-3">
+          <button
+            onClick={() => {
+              setShowTopics(true)
+              void reloadTopics()
+            }}
+            className="row-press flex w-full items-center justify-between rounded-2xl border border-line px-4 py-3 text-left font-bold"
+          >
+            <span>{t('topics.title', state.lang)}</span>
+            <span className="text-xs text-muted">{topics.length}</span>
+          </button>
+        </div>
+      )}
+
+      {isAdmin && (
+        <div className="mx-4 mt-3 flex flex-col gap-2">
+          {joinRequests.length > 0 && (
+            <button
+              onClick={() => {
+                setShowRequests(true)
+                void reloadJoinRequests()
+              }}
+              className="row-press flex w-full items-center justify-between rounded-2xl border border-line px-4 py-3 text-left font-bold"
+            >
+              <span>{t('group.requests', state.lang)}</span>
+              <span className="rounded-full border border-ink px-2 py-0.5 text-[11px]">
+                {joinRequests.length}
+              </span>
+            </button>
+          )}
+          <button
+            onClick={() => {
+              setShowAdminLog(true)
+              void reloadAdminLog()
+            }}
+            className="row-press flex w-full items-center justify-between rounded-2xl border border-line px-4 py-3 text-left font-bold"
+          >
+            <span>{t('group.adminLog', state.lang)}</span>
+            <IconChevron size={16} />
+          </button>
+        </div>
+      )}
+
       <div className="mt-6 px-4">
         <h2 className="mb-2 text-xs font-black uppercase tracking-[0.2em]">
           {members.length}{' '}
@@ -252,6 +346,91 @@ export function GroupInfoScreen() {
       </div>
 
       <div className="h-10" />
+
+      {/* Admin log modal */}
+      <Modal open={showAdminLog} onClose={() => setShowAdminLog(false)} title={t('group.adminLog', state.lang)}>
+        {adminLog.length === 0 ? (
+          <p className="py-4 text-center text-sm text-muted">{t('group.adminLogEmpty', state.lang)}</p>
+        ) : (
+          <ul className="flex max-h-[60vh] flex-col gap-2 overflow-y-auto">
+            {adminLog.map((e) => {
+              const actor = userById(e.actorId)
+              return (
+                <li key={e.id} className="rounded-xl border border-line px-3 py-2">
+                  <div className="flex items-center justify-between text-xs text-muted">
+                    <span className="font-bold uppercase tracking-wider text-ink">
+                      {e.action.replace(/_/g, ' ')}
+                    </span>
+                    <span>{new Date(e.createdAt).toLocaleString()}</span>
+                  </div>
+                  <div className="mt-1 text-sm">
+                    {actor?.name ?? e.actorId}
+                    {e.targetId ? ` → ${e.targetKind} ${e.targetId}` : ''}
+                  </div>
+                  {Object.keys(e.payload || {}).length > 0 && (
+                    <pre className="mt-1 overflow-x-auto rounded bg-paper-soft px-2 py-1 text-[11px]">
+                      {JSON.stringify(e.payload, null, 0)}
+                    </pre>
+                  )}
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </Modal>
+
+      {/* Pending join requests */}
+      <Modal open={showRequests} onClose={() => setShowRequests(false)} title={t('group.requests', state.lang)}>
+        {joinRequests.length === 0 ? (
+          <p className="py-4 text-center text-sm text-muted">{t('group.requestsEmpty', state.lang)}</p>
+        ) : (
+          <ul className="flex max-h-[60vh] flex-col gap-2 overflow-y-auto">
+            {joinRequests.map((req) => {
+              const u = userById(req.userId)
+              const decide = async (approve: boolean) => {
+                try {
+                  await api.decideInviteRequest(chat.id, req.id, approve)
+                  await reloadJoinRequests()
+                  if (approve) await reloadMembers()
+                } catch {
+                  /* ignore */
+                }
+              }
+              return (
+                <li key={req.id} className="flex items-center gap-3 rounded-xl border border-line px-3 py-2">
+                  <Avatar name={u?.name ?? req.userId} size={36} filled />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-bold">{u?.name ?? req.userId}</div>
+                    <div className="truncate text-xs text-muted">{u?.handle ? `@${u.handle}` : req.userId}</div>
+                  </div>
+                  <button
+                    onClick={() => void decide(false)}
+                    className="rounded-full border-2 border-ink bg-paper px-3 py-1 text-xs font-bold"
+                  >
+                    {t('group.deny', state.lang)}
+                  </button>
+                  <button
+                    onClick={() => void decide(true)}
+                    className="rounded-full border-2 border-ink bg-ink px-3 py-1 text-xs font-bold text-paper"
+                  >
+                    {t('group.approve', state.lang)}
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </Modal>
+
+      {/* Topics list */}
+      <TopicsModal
+        open={showTopics}
+        onClose={() => setShowTopics(false)}
+        chat={chat}
+        topics={topics}
+        canManage={isAdmin}
+        onChange={reloadTopics}
+      />
 
       {/* Edit title/desc/public sheet */}
       <EditSheet
@@ -460,6 +639,11 @@ function EditSheet({
     subscribersOnly?: boolean
     signedPosts?: boolean
     autoDeleteSeconds?: number
+    banMedia?: boolean
+    banVoice?: boolean
+    banStickers?: boolean
+    banLinks?: boolean
+    topicsEnabled?: boolean
   }) => Promise<void>
 }) {
   const { state } = useApp()
@@ -470,6 +654,11 @@ function EditSheet({
   const [subOnly, setSubOnly] = useState(!!chat.subscribersOnly)
   const [signed, setSigned] = useState(!!chat.signedPosts)
   const [autoDel, setAutoDel] = useState(chat.autoDeleteSeconds ?? 0)
+  const [banMedia, setBanMedia] = useState(!!chat.banMedia)
+  const [banVoice, setBanVoice] = useState(!!chat.banVoice)
+  const [banStickers, setBanStickers] = useState(!!chat.banStickers)
+  const [banLinks, setBanLinks] = useState(!!chat.banLinks)
+  const [topicsOn, setTopicsOn] = useState(!!chat.topicsEnabled)
   useEffect(() => {
     if (!open) return
     queueMicrotask(() => {
@@ -480,6 +669,11 @@ function EditSheet({
       setSubOnly(!!chat.subscribersOnly)
       setSigned(!!chat.signedPosts)
       setAutoDel(chat.autoDeleteSeconds ?? 0)
+      setBanMedia(!!chat.banMedia)
+      setBanVoice(!!chat.banVoice)
+      setBanStickers(!!chat.banStickers)
+      setBanLinks(!!chat.banLinks)
+      setTopicsOn(!!chat.topicsEnabled)
     })
   }, [open, chat])
   return (
@@ -496,6 +690,11 @@ function EditSheet({
             subscribersOnly: subOnly,
             signedPosts: signed,
             autoDeleteSeconds: autoDel,
+            banMedia,
+            banVoice,
+            banStickers,
+            banLinks,
+            topicsEnabled: topicsOn,
           })
         }}
       >
@@ -580,6 +779,43 @@ function EditSheet({
             ))}
           </div>
         </div>
+        {chat.kind !== 'dm' && (
+          <div className="flex flex-col gap-2 rounded-2xl border border-line px-3 py-2">
+            <span className="text-sm font-bold uppercase tracking-wider">
+              {t('group.restrictions', state.lang)}
+            </span>
+            {[
+              { label: t('group.banMedia', state.lang), val: banMedia, set: setBanMedia },
+              { label: t('group.banVoice', state.lang), val: banVoice, set: setBanVoice },
+              { label: t('group.banStickers', state.lang), val: banStickers, set: setBanStickers },
+              { label: t('group.banLinks', state.lang), val: banLinks, set: setBanLinks },
+            ].map((row, i) => (
+              <label
+                key={i}
+                className="row-press flex items-center justify-between rounded-xl px-2 py-1"
+              >
+                <span className="text-sm">{row.label}</span>
+                <input
+                  type="checkbox"
+                  checked={row.val}
+                  onChange={(e) => row.set(e.target.checked)}
+                  className="h-5 w-5 accent-ink"
+                />
+              </label>
+            ))}
+          </div>
+        )}
+        {chat.kind !== 'dm' && (
+          <label className="row-press flex items-center justify-between rounded-2xl border border-line px-3 py-2">
+            <span className="text-sm font-bold">{t('group.topicsEnabled', state.lang)}</span>
+            <input
+              type="checkbox"
+              checked={topicsOn}
+              onChange={(e) => setTopicsOn(e.target.checked)}
+              className="h-5 w-5 accent-ink"
+            />
+          </label>
+        )}
         <div className="flex gap-3">
           <button type="button" className="bw-btn-ghost flex-1" onClick={onClose}>
             {t('common.cancel', state.lang)}
@@ -682,6 +918,114 @@ function SheetRow({
         {label}
       </button>
     </li>
+  )
+}
+
+function TopicsModal({
+  open,
+  onClose,
+  chat,
+  topics,
+  canManage,
+  onChange,
+}: {
+  open: boolean
+  onClose: () => void
+  chat: Chat
+  topics: ApiTopic[]
+  canManage: boolean
+  onChange: () => Promise<void> | void
+}) {
+  const { state } = useApp()
+  const navigate = useNavigate()
+  const [title, setTitle] = useState('')
+  const [icon, setIcon] = useState('')
+  const create = async () => {
+    const trimmed = title.trim()
+    if (!trimmed) return
+    try {
+      await api.createTopic(chat.id, trimmed, icon.trim())
+      setTitle('')
+      setIcon('')
+      await onChange()
+    } catch {
+      /* ignore */
+    }
+  }
+  const close = async (topicId: string, closed: boolean) => {
+    try {
+      await api.patchTopic(chat.id, topicId, { closed })
+      await onChange()
+    } catch {
+      /* ignore */
+    }
+  }
+  return (
+    <Modal open={open} onClose={onClose} title={t('topics.title', state.lang)}>
+      {canManage && (
+        <div className="mb-3 flex flex-col gap-2 rounded-2xl border border-line p-2">
+          <div className="flex gap-2">
+            <input
+              className="bw-input w-16 text-center"
+              value={icon}
+              onChange={(e) => setIcon(e.target.value.slice(0, 4))}
+              placeholder={t('topics.iconPlaceholder', state.lang)}
+            />
+            <input
+              className="bw-input flex-1"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder={t('topics.namePlaceholder', state.lang)}
+              maxLength={80}
+            />
+          </div>
+          <button
+            type="button"
+            className="bw-btn-primary"
+            onClick={() => void create()}
+            disabled={!title.trim()}
+          >
+            {t('topics.create', state.lang)}
+          </button>
+        </div>
+      )}
+      {topics.length === 0 ? (
+        <p className="py-4 text-center text-sm text-muted">{t('topics.empty', state.lang)}</p>
+      ) : (
+        <ul className="flex max-h-[55vh] flex-col gap-1 overflow-y-auto">
+          {topics.map((tp) => (
+            <li
+              key={tp.id}
+              className="row-press flex items-center gap-3 rounded-2xl border border-line px-3 py-2"
+            >
+              <button
+                className="flex flex-1 items-center gap-2 text-left"
+                onClick={() => {
+                  onClose()
+                  navigate(`/chat/${chat.id}?topic=${encodeURIComponent(tp.id)}`)
+                }}
+              >
+                <span className="text-lg">{tp.icon || '#'}</span>
+                <span className="truncate font-bold">{tp.title}</span>
+                {tp.closed && (
+                  <span className="rounded-full border border-ink px-1.5 py-0.5 text-[10px] font-black uppercase">
+                    {t('topics.closed', state.lang)}
+                  </span>
+                )}
+              </button>
+              {canManage && (
+                <button
+                  className="rounded-full border border-ink px-2 py-1 text-[11px] font-bold"
+                  onClick={() => void close(tp.id, !tp.closed)}
+                >
+                  {tp.closed ? t('topics.reopen', state.lang) : t('topics.close', state.lang)}
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </Modal>
   )
 }
 
