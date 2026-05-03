@@ -210,9 +210,13 @@ def join_via_invite(
                     )
                 )
                 db.commit()
-            elif req.status == "denied":
-                # Allow re-requesting after a denial.
+            elif req.status in ("denied", "approved"):
+                # Allow re-requesting after a denial, or after a user who
+                # was previously approved left the chat and now wants to
+                # rejoin via the same invite.
                 req.status = "pending"
+                req.decided_by = None
+                req.decided_at = None
                 req.created_at = now_ms()
                 req.invite_token = token
                 db.commit()
@@ -300,6 +304,32 @@ def decide_invite_request(
             .first()
         )
         if not existing:
+            # Atomically claim a slot on the originating invite so
+            # `max_uses` remains a hard cap even when admins approve a
+            # backlog of pending requests one by one. Mirrors the
+            # join_via_invite fast path.
+            inv = (
+                db.query(ChatInvite)
+                .filter(ChatInvite.token == req.invite_token)
+                .first()
+            )
+            if inv is not None:
+                stmt = (
+                    update(ChatInvite)
+                    .where(ChatInvite.id == inv.id, ChatInvite.revoked.is_(False))
+                    .values(uses=ChatInvite.uses + 1)
+                )
+                if inv.max_uses is not None:
+                    stmt = stmt.where(ChatInvite.uses < inv.max_uses)
+                if inv.expires_at is not None:
+                    stmt = stmt.where(ChatInvite.expires_at >= now_ms())
+                result = db.execute(stmt)
+                if result.rowcount == 0:
+                    db.rollback()
+                    raise HTTPException(
+                        status_code=410,
+                        detail="Invite invalid or expired",
+                    )
             db.add(
                 ChatMember(
                     chat_id=chat_id,
