@@ -356,10 +356,29 @@ export function CallsProvider({ children }: { children: ReactNode }) {
   // --- Public actions ------------------------------------------------------
   const startCall = useCallback(
     async (peerId: string, media: MediaKind) => {
-      if (state.kind !== 'idle' && state.kind !== 'ended') return
+      // Use the ref, not the closure: `acquireMedia` awaits the browser
+      // permission prompt (can take seconds), during which an inbound
+      // call may have transitioned us into `incoming`. Re-checking
+      // closure state would clobber that with an outgoing call the user
+      // never asked for. Same pattern as acceptCall / endCall.
+      if (stateRef.current.kind !== 'idle' && stateRef.current.kind !== 'ended') return
       const callId = newCallId()
       try {
         const stream = await acquireMedia(media)
+        // Re-check after the await: a `call:offer` could have arrived
+        // during the permission prompt and won the race.
+        if (stateRef.current.kind !== 'idle' && stateRef.current.kind !== 'ended') {
+          for (const tr of stream.getTracks()) {
+            try {
+              tr.stop()
+            } catch {
+              /* ignore */
+            }
+          }
+          localStreamRef.current = null
+          setLocalStream(null)
+          return
+        }
         const pc = buildPC(peerId, callId)
         for (const track of stream.getTracks()) pc.addTrack(track, stream)
         const offer = await pc.createOffer()
@@ -384,7 +403,7 @@ export function CallsProvider({ children }: { children: ReactNode }) {
         setState({ kind: 'ended', peerId, reason: 'failed' })
       }
     },
-    [state.kind, acquireMedia, buildPC, sendSignal, cleanupPC],
+    [acquireMedia, buildPC, sendSignal, cleanupPC],
   )
 
   const acceptCall = useCallback(async () => {

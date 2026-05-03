@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useApp } from '../store'
 import { t } from '../i18n'
 import { Avatar } from '../components/Avatar'
@@ -19,17 +19,26 @@ export function CallOverlay() {
   const lang = appState.lang
   const calls = useCalls()
   const { state, localStream, remoteStream, acceptCall, endCall, toggleMic, toggleCam, clearEnded } = calls
-  const localRef = useRef<HTMLVideoElement>(null)
-  const remoteRef = useRef<HTMLVideoElement>(null)
+  // Callback refs: video / audio elements are conditionally mounted (the
+  // <video> tags exist only while `showVideo` is true; the <audio> only
+  // for audio calls). Streams are set inside the provider *before* state
+  // transitions to a kind that mounts those elements, so a regular
+  // useRef + useEffect would never see the element when the stream is
+  // ready, leaving srcObject null. Callback refs run the moment the
+  // element attaches, so we wire srcObject as soon as both are present.
+  const remoteAttach = useCallback(
+    (el: HTMLVideoElement | HTMLAudioElement | null) => {
+      if (el) el.srcObject = remoteStream
+    },
+    [remoteStream],
+  )
+  const localAttach = useCallback(
+    (el: HTMLVideoElement | null) => {
+      if (el) el.srcObject = localStream
+    },
+    [localStream],
+  )
   const [tick, setTick] = useState(0)
-
-  // Wire streams.
-  useEffect(() => {
-    if (localRef.current) localRef.current.srcObject = localStream
-  }, [localStream])
-  useEffect(() => {
-    if (remoteRef.current) remoteRef.current.srcObject = remoteStream
-  }, [remoteStream])
 
   // Tick once a second to refresh the elapsed timer in `in-call`.
   useEffect(() => {
@@ -87,13 +96,13 @@ export function CallOverlay() {
       {showVideo && (
         <div className="relative my-4 flex w-full max-w-[480px] flex-1 items-center justify-center">
           <video
-            ref={remoteRef}
+            ref={remoteAttach}
             autoPlay
             playsInline
             className="max-h-full w-full rounded-2xl border-2 border-paper bg-black object-contain"
           />
           <video
-            ref={localRef}
+            ref={localAttach}
             autoPlay
             playsInline
             muted
@@ -103,9 +112,7 @@ export function CallOverlay() {
       )}
 
       {/* Hidden audio for audio-only calls — must still play to expose remote audio. */}
-      {!isVideo && (
-        <audio ref={remoteRef as unknown as React.RefObject<HTMLAudioElement>} autoPlay />
-      )}
+      {!isVideo && <audio ref={remoteAttach} autoPlay />}
 
       {/* Bottom: call controls */}
       <div className="flex w-full max-w-md items-center justify-center gap-4 pb-6">
